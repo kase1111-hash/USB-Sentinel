@@ -1,0 +1,165 @@
+# USB Sentinel Policy Rules
+# =========================
+#
+# Rules are evaluated top-to-bottom. First matching rule determines the action.
+# Actions: allow, block, review (escalate to LLM analyzer)
+#
+# Match conditions:
+#   vid: Vendor ID (hex string, e.g., '046d')
+#   pid: Product ID (hex string, e.g., 'c534')
+#   class: Device or interface class (name or number)
+#   manufacturer: Manufacturer string (regex)
+#   product: Product string (regex)
+#   serial: Serial number (regex)
+#   has_storage_endpoint: Device has mass storage capability (bool)
+#   has_hid_endpoint: Device has HID capability (bool)
+#   endpoint_count_gt: More than N endpoints (int)
+#   first_seen: Device has never been seen before (bool)
+
+rules:
+  # ===================
+  # TRUSTED DEVICES
+  # ===================
+  # Add your known trusted devices here by VID:PID
+
+  - match:
+      vid: '046d'
+      pid: 'c534'
+    action: allow
+    comment: 'Logitech Unifying Receiver'
+
+  - match:
+      vid: '046d'
+      pid: 'c52b'
+    action: allow
+    comment: 'Logitech Unifying Receiver (alternate)'
+
+  - match:
+      vid: '8087'
+    action: allow
+    comment: 'Intel Bluetooth adapters'
+
+  # ===================
+  # BLOCKED DEVICES
+  # ===================
+  # Known malicious or high-risk device signatures
+
+  - match:
+      vid: '1a86'
+      pid: '7523'
+    action: block
+    comment: 'CH340 serial adapter - common in attack hardware'
+
+  - match:
+      vid: '0483'
+      pid: 'df11'
+    action: block
+    comment: 'STM32 DFU mode - firmware update risk'
+
+  - match:
+      manufacturer: '^USB Device$'
+      class: 'HID'
+    action: block
+    comment: 'Generic HID with placeholder manufacturer - suspicious'
+
+  - match:
+      product: '(?i)rubber.?ducky'
+    action: block
+    comment: 'Known attack device signature'
+
+  - match:
+      product: '(?i)bash.?bunny'
+    action: block
+    comment: 'Known attack device signature'
+
+  # ===================
+  # SUSPICIOUS PATTERNS
+  # ===================
+  # Devices matching these patterns require LLM review
+
+  - match:
+      class: 'HID'
+      has_storage_endpoint: true
+    action: review
+    comment: 'HID device with storage capability - suspicious combination'
+
+  - match:
+      class: 'HID'
+      endpoint_count_gt: 2
+    action: review
+    comment: 'HID device with unusually many endpoints'
+
+  - match:
+      manufacturer: null
+    action: review
+    comment: 'Missing manufacturer string - requires analysis'
+
+  - match:
+      product: null
+    action: review
+    comment: 'Missing product string - requires analysis'
+
+  - match:
+      first_seen: true
+      class: 'HID'
+    action: review
+    comment: 'New HID device - verify before allowing'
+
+  - match:
+      class: 0xFF
+    action: review
+    comment: 'Vendor-specific class - unknown risk'
+
+  - match:
+      class: 0xFE
+    action: review
+    comment: 'Application-specific class - firmware update risk'
+
+  # ===================
+  # LOW-RISK CLASSES
+  # ===================
+  # Generally safe device classes (still logged)
+
+  - match:
+      class: 'Audio'
+    action: allow
+    comment: 'Audio devices - generally low risk'
+
+  - match:
+      class: 'Printer'
+    action: allow
+    comment: 'Printers - low risk but log for data exfil awareness'
+
+  - match:
+      class: 'Hub'
+    action: allow
+    comment: 'USB hubs - physical layer, children will be evaluated'
+
+  # ===================
+  # DEFAULT RULE
+  # ===================
+  # Zero-trust baseline: review all unknown devices
+
+  - match: '*'
+    action: review
+    comment: 'Default - unknown devices require LLM analysis'
+
+# ===================
+# CLASS CODE REFERENCE
+# ===================
+# 0x00 - Defined at Interface
+# 0x01 - Audio
+# 0x02 - Communications (CDC)
+# 0x03 - HID (HIGH RISK)
+# 0x05 - Physical
+# 0x06 - Image
+# 0x07 - Printer
+# 0x08 - Mass Storage (HIGH RISK)
+# 0x09 - Hub
+# 0x0A - CDC-Data
+# 0x0B - Smart Card
+# 0x0E - Video
+# 0xE0 - Wireless
+# 0xEF - Miscellaneous
+# 0xFE - Application Specific (HIGH RISK)
+# 0xFF - Vendor Specific (UNKNOWN RISK)
