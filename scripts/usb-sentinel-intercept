@@ -1,0 +1,215 @@
+#!/usr/bin/env python3
+"""
+USB Sentinel Intercept Script
+
+Called by udev on USB device insertion events.
+Communicates with the USB Sentinel daemon to analyze devices.
+
+Usage: usb-sentinel-intercept <kernel_name> <sysfs_path>
+
+Exit codes:
+    0 - Device allowed
+    1 - Device blocked
+    2 - Error communicating with daemon
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import socket
+import sys
+import time
+from pathlib import Path
+
+
+# Configuration
+SOCKET_PATH = "/var/run/usb-sentinel.sock"
+TIMEOUT = 10.0  # seconds
+FALLBACK_ALLOW = True  # Allow device if daemon is not running
+
+
+def log(message: str) -> None:
+    """Log message to syslog-compatible format."""
+    print(f"usb-sentinel-intercept: {message}", file=sys.stderr)
+
+
+def get_device_info(kernel_name: str, sysfs_path: str) -> dict:
+    """
+    Extract basic device info from sysfs.
+
+    Args:
+        kernel_name: Kernel device name (e.g., "1-1.2")
+        sysfs_path: Path in sysfs (e.g., "/devices/pci0000:00/.../1-1.2")
+
+    Returns:
+        Dictionary with device information
+    """
+    # Construct full sysfs path
+    sys_path = Path("/sys") / sysfs_path.lstrip("/")
+
+    info = {
+        "kernel_name": kernel_name,
+        "sysfs_path": sysfs_path,
+        "timestamp": time.time(),
+    }
+
+    # Read device attributes from sysfs
+    attrs = [
+        ("idVendor", "vid"),
+        ("idProduct", "pid"),
+        ("bDeviceClass", "device_class"),
+        ("bDeviceSubClass", "device_subclass"),
+        ("bDeviceProtocol", "device_protocol"),
+        ("manufacturer", "manufacturer"),
+        ("product", "product"),
+        ("serial", "serial"),
+        ("busnum", "bus"),
+        ("devnum", "address"),
+    ]
+
+    for sysfs_name, info_name in attrs:
+        attr_path = sys_path / sysfs_name
+        if attr_path.exists():
+            try:
+                value = attr_path.read_text().strip()
+                # Convert numeric values
+                if info_name in ("bus", "address", "device_class", "device_subclass", "device_protocol"):
+                    value = int(value, 16) if value.startswith("0x") else int(value)
+                info[info_name] = value
+            except (IOError, ValueError):
+                pass
+
+    return info
+
+
+def send_to_daemon(device_info: dict) -> dict | None:
+    """
+    Send device info to daemon and get response.
+
+    Args:
+        device_info: Device information dictionary
+
+    Returns:
+        Response dictionary or None if communication failed
+    """
+    if not Path(SOCKET_PATH).exists():
+        log(f"Daemon socket not found: {SOCKET_PATH}")
+        return None
+
+    try:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(TIMEOUT)
+        sock.connect(SOCKET_PATH)
+
+        # Send request
+        request = {
+            "type": "device_event",
+            "action": "add",
+            "device": device_info,
+        }
+        sock.sendall(json.dumps(request).encode() + b"\n")
+
+        # Read response
+        response_data = b""
+        while True:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            response_data += chunk
+            if b"\n" in response_data:
+                break
+
+        sock.close()
+
+        if response_data:
+            return json.loads(response_data.decode().strip())
+        return None
+
+    except socket.timeout:
+        log("Timeout waiting for daemon response")
+        return None
+    except socket.error as e:
+        log(f"Socket error: {e}")
+        return None
+    except json.JSONDecodeError as e:
+        log(f"Invalid response from daemon: {e}")
+        return None
+
+
+def set_device_authorized(sysfs_path: str, authorized: bool) -> bool:
+    """
+    Set device authorization state.
+
+    Args:
+        sysfs_path: Device sysfs path
+        authorized: Whether to authorize the device
+
+    Returns:
+        True if successful
+    """
+    sys_path = Path("/sys") / sysfs_path.lstrip("/")
+    auth_file = sys_path / "authorized"
+
+    if not auth_file.exists():
+        log(f"No authorized file at {auth_file}")
+        return False
+
+    try:
+        auth_file.write_text("1" if authorized else "0")
+        return True
+    except IOError as e:
+        log(f"Failed to set authorized: {e}")
+        return False
+
+
+def main() -> int:
+    """Main entry point."""
+    if len(sys.argv) < 3:
+        print(f"Usage: {sys.argv[0]} <kernel_name> <sysfs_path>", file=sys.stderr)
+        return 2
+
+    kernel_name = sys.argv[1]
+    sysfs_path = sys.argv[2]
+
+    log(f"Intercepting device: {kernel_name} at {sysfs_path}")
+
+    # Get device information
+    device_info = get_device_info(kernel_name, sysfs_path)
+    log(f"Device: VID={device_info.get('vid')} PID={device_info.get('pid')}")
+
+    # Send to daemon for analysis
+    response = send_to_daemon(device_info)
+
+    if response is None:
+        # Daemon not available
+        if FALLBACK_ALLOW:
+            log("Daemon unavailable, allowing device (fallback)")
+            set_device_authorized(sysfs_path, True)
+            return 0
+        else:
+            log("Daemon unavailable, blocking device (fallback)")
+            set_device_authorized(sysfs_path, False)
+            return 1
+
+    # Process daemon response
+    verdict = response.get("verdict", "block").lower()
+    reason = response.get("reason", "")
+
+    if verdict == "allow":
+        log(f"Device ALLOWED: {reason}")
+        set_device_authorized(sysfs_path, True)
+        return 0
+    elif verdict == "review":
+        # Device needs further analysis, keep blocked for now
+        log(f"Device under REVIEW: {reason}")
+        set_device_authorized(sysfs_path, False)
+        return 1
+    else:
+        log(f"Device BLOCKED: {reason}")
+        set_device_authorized(sysfs_path, False)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
