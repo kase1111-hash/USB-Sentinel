@@ -5,6 +5,13 @@ Implements deterministic, rule-based device authorization.
 Evaluates device attributes against a configured ruleset.
 """
 
+from sentinel.policy.engine import (
+    EvaluationResult,
+    PolicyBuilder,
+    PolicyEngine,
+    RuleMatcher,
+    create_default_policy,
+)
 from sentinel.policy.fingerprint import (
     DeviceFingerprint,
     FingerprintDatabase,
@@ -13,9 +20,20 @@ from sentinel.policy.fingerprint import (
     generate_fingerprint,
 )
 from sentinel.policy.models import Action, MatchCondition, Policy, PolicyRule, USBClass
-from sentinel.policy.parser import load_policy, parse_policy, validate_policy
+from sentinel.policy.parser import (
+    PolicyParseError,
+    load_policy,
+    parse_policy,
+    validate_policy,
+)
 
 __all__ = [
+    # Engine
+    "EvaluationResult",
+    "PolicyBuilder",
+    "PolicyEngine",
+    "RuleMatcher",
+    "create_default_policy",
     # Fingerprinting
     "DeviceFingerprint",
     "FingerprintDatabase",
@@ -29,6 +47,7 @@ __all__ = [
     "PolicyRule",
     "USBClass",
     # Parser
+    "PolicyParseError",
     "load_policy",
     "parse_policy",
     "validate_policy",

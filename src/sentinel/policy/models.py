@@ -35,8 +35,15 @@ class MatchCondition:
     vid: str | None = None  # Vendor ID (hex string)
     pid: str | None = None  # Product ID (hex string)
 
+    # Range matching
+    vid_list: list[str] | None = None  # Match any VID in list
+    pid_list: list[str] | None = None  # Match any PID in list
+    vid_range: tuple[str, str] | None = None  # VID range (min, max)
+
     # Class matching
     device_class: int | str | None = None  # Device or interface class
+    interface_class: int | str | None = None  # Specific interface class
+    class_list: list[int | str] | None = None  # Match any class in list
 
     # String pattern matching (regex)
     manufacturer: str | None = None
@@ -46,12 +53,20 @@ class MatchCondition:
     # Boolean checks
     has_storage_endpoint: bool | None = None
     has_hid_endpoint: bool | None = None
+    has_bulk_endpoint: bool | None = None
+    is_composite: bool | None = None  # Multiple interfaces
+    is_keyboard: bool | None = None
+    is_mouse: bool | None = None
 
     # Numeric comparisons
     endpoint_count_gt: int | None = None
+    endpoint_count_lt: int | None = None
+    interface_count_gt: int | None = None
+    interface_count_lt: int | None = None
 
     # State checks
     first_seen: bool | None = None
+    trust_level: str | None = None  # Match devices with specific trust level
 
     # Wildcard match
     match_all: bool = False
@@ -60,15 +75,66 @@ class MatchCondition:
         """Check if this is a wildcard (match-all) condition."""
         return self.match_all
 
+    def has_conditions(self) -> bool:
+        """Check if any conditions are specified."""
+        if self.match_all:
+            return True
+        for key, value in self.__dict__.items():
+            if key != "match_all" and value is not None:
+                return True
+        return False
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary, excluding None values."""
+        if self.match_all:
+            return {"match": "*"}
+
         result = {}
         for key, value in self.__dict__.items():
             if value is not None and key != "match_all":
-                result[key] = value
-        if self.match_all:
-            return {"match": "*"}
+                # Handle special serialization cases
+                if key == "vid_range" and value:
+                    result[key] = list(value)
+                else:
+                    result[key] = value
         return result
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "MatchCondition":
+        """Create from dictionary."""
+        if data == "*" or data.get("match") == "*":
+            return cls(match_all=True)
+
+        # Handle vid_range conversion
+        vid_range = data.get("vid_range")
+        if vid_range and isinstance(vid_range, list) and len(vid_range) == 2:
+            vid_range = tuple(vid_range)
+
+        return cls(
+            vid=data.get("vid"),
+            pid=data.get("pid"),
+            vid_list=data.get("vid_list"),
+            pid_list=data.get("pid_list"),
+            vid_range=vid_range,
+            device_class=data.get("device_class") or data.get("class"),
+            interface_class=data.get("interface_class"),
+            class_list=data.get("class_list"),
+            manufacturer=data.get("manufacturer"),
+            product=data.get("product"),
+            serial=data.get("serial"),
+            has_storage_endpoint=data.get("has_storage_endpoint"),
+            has_hid_endpoint=data.get("has_hid_endpoint"),
+            has_bulk_endpoint=data.get("has_bulk_endpoint"),
+            is_composite=data.get("is_composite"),
+            is_keyboard=data.get("is_keyboard"),
+            is_mouse=data.get("is_mouse"),
+            endpoint_count_gt=data.get("endpoint_count_gt"),
+            endpoint_count_lt=data.get("endpoint_count_lt"),
+            interface_count_gt=data.get("interface_count_gt"),
+            interface_count_lt=data.get("interface_count_lt"),
+            first_seen=data.get("first_seen"),
+            trust_level=data.get("trust_level"),
+        )
 
 
 @dataclass
