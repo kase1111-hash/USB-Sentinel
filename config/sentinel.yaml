@@ -1,0 +1,111 @@
+# USB Sentinel Daemon Configuration
+# =================================
+
+# General settings
+daemon:
+  # Run as background daemon
+  daemonize: false
+  # PID file location
+  pid_file: /var/run/usb-sentinel.pid
+  # Log level: debug, info, warning, error
+  log_level: info
+  # Log file (null for stdout)
+  log_file: /var/log/usb-sentinel.log
+
+# Policy settings
+policy:
+  # Path to policy rules file
+  rules_file: /etc/usb-sentinel/policy.yaml
+  # Default action when no rules match: allow, block, review
+  default_action: review
+  # Enable hot-reload of policy file
+  hot_reload: true
+
+# Database settings
+database:
+  # SQLite database path
+  path: /var/lib/usb-sentinel/audit.db
+  # Enable WAL mode for better concurrency
+  wal_mode: true
+  # Backup interval in hours (0 to disable)
+  backup_interval: 24
+
+# LLM Analyzer settings
+analyzer:
+  # Enable LLM analysis for REVIEW verdicts
+  enabled: true
+  # API provider: anthropic, local
+  provider: anthropic
+  # Model to use
+  model: claude-sonnet-4-20250514
+  # API key (use environment variable ANTHROPIC_API_KEY)
+  api_key: null
+  # Maximum tokens for analysis response
+  max_tokens: 1024
+  # Request timeout in seconds
+  timeout: 30
+  # Rate limit: max requests per minute
+  rate_limit: 60
+  # Local LLM settings (when provider: local)
+  local:
+    model_path: /opt/usb-sentinel/models/llama-2-7b.gguf
+    n_ctx: 2048
+    n_gpu_layers: 0
+
+# USB Interceptor settings
+interceptor:
+  # Platform: linux, windows, auto
+  platform: auto
+  # Block devices during analysis (requires root)
+  block_during_analysis: true
+  # Analysis timeout in seconds (device blocked until complete or timeout)
+  analysis_timeout: 10
+  # Allowed USB classes that bypass review (use with caution)
+  bypass_classes: []
+
+# Virtual USB Proxy settings (sandbox)
+proxy:
+  # Enable USB/IP proxy for sandboxed inspection
+  enabled: false
+  # Proxy host (isolated VM/container)
+  host: localhost
+  # Proxy port
+  port: 3240
+  # Enable traffic capture
+  capture_traffic: true
+  # Capture file directory
+  capture_dir: /var/lib/usb-sentinel/captures
+
+# API server settings
+api:
+  # Enable REST API
+  enabled: true
+  # Listen host
+  host: 127.0.0.1
+  # Listen port
+  port: 8000
+  # Enable CORS (for dashboard)
+  cors_enabled: true
+  # Allowed origins for CORS
+  cors_origins:
+    - http://localhost:3000
+    - http://127.0.0.1:3000
+  # Authentication mode: none, api_key, mtls
+  auth_mode: api_key
+  # API key for authentication (use environment variable SENTINEL_API_KEY)
+  api_key: null
+
+# Alert settings
+alerts:
+  # Enable alerts for high-risk events
+  enabled: true
+  # Risk score threshold for alerts (0-100)
+  threshold: 75
+  # Alert methods
+  methods:
+    # Desktop notification
+    desktop: true
+    # Syslog
+    syslog: true
+    # Webhook URL (null to disable)
+    webhook: null
