@@ -104,20 +104,49 @@ class RuleMatcher:
 
         # Check each condition (AND logic - all must match)
 
-        # VID match
+        # VID exact match
         if condition.vid is not None:
             if device.vid.lower() != condition.vid.lower():
                 return False
 
-        # PID match
+        # PID exact match
         if condition.pid is not None:
             if device.pid.lower() != condition.pid.lower():
+                return False
+
+        # VID list match (OR within list)
+        if condition.vid_list is not None:
+            if device.vid.lower() not in [v.lower() for v in condition.vid_list]:
+                return False
+
+        # PID list match (OR within list)
+        if condition.pid_list is not None:
+            if device.pid.lower() not in [p.lower() for p in condition.pid_list]:
+                return False
+
+        # VID range match
+        if condition.vid_range is not None:
+            min_vid, max_vid = condition.vid_range
+            device_vid = int(device.vid, 16)
+            if not (int(min_vid, 16) <= device_vid <= int(max_vid, 16)):
                 return False
 
         # Device class match
         if condition.device_class is not None:
             class_code = self._normalize_class(condition.device_class)
             if not self._matches_class(device, class_code):
+                return False
+
+        # Interface class match (specific interface must have this class)
+        if condition.interface_class is not None:
+            class_code = self._normalize_class(condition.interface_class)
+            if not any(intf.interface_class == class_code for intf in device.interfaces):
+                return False
+
+        # Class list match (device or any interface has one of these classes)
+        if condition.class_list is not None:
+            class_codes = [self._normalize_class(c) for c in condition.class_list]
+            if not self._matches_any_class(device, class_codes):
                 return False
 
         # Manufacturer regex match
@@ -156,9 +185,46 @@ class RuleMatcher:
             if condition.has_hid_endpoint != has_hid:
                 return False
 
+        # Has bulk endpoint
+        if condition.has_bulk_endpoint is not None:
+            has_bulk = self._has_bulk_endpoint(device)
+            if condition.has_bulk_endpoint != has_bulk:
+                return False
+
+        # Is composite device (multiple interfaces)
+        if condition.is_composite is not None:
+            is_composite = len(device.interfaces) > 1
+            if condition.is_composite != is_composite:
+                return False
+
+        # Is keyboard
+        if condition.is_keyboard is not None:
+            if condition.is_keyboard != device.is_keyboard:
+                return False
+
+        # Is mouse
+        if condition.is_mouse is not None:
+            if condition.is_mouse != device.is_mouse:
+                return False
+
         # Endpoint count > N
         if condition.endpoint_count_gt is not None:
             if device.total_endpoints <= condition.endpoint_count_gt:
+                return False
+
+        # Endpoint count < N
+        if condition.endpoint_count_lt is not None:
+            if device.total_endpoints >= condition.endpoint_count_lt:
+                return False
+
+        # Interface count > N
+        if condition.interface_count_gt is not None:
+            if len(device.interfaces) <= condition.interface_count_gt:
+                return False
+
+        # Interface count < N
+        if condition.interface_count_lt is not None:
+            if len(device.interfaces) >= condition.interface_count_lt:
                 return False
 
         # First seen check
@@ -166,6 +232,16 @@ class RuleMatcher:
             fingerprint = generate_fingerprint(device)
             is_first = self.fingerprint_db.is_first_seen(fingerprint)
             if condition.first_seen != is_first:
+                return False
+
+        # Trust level check (requires external trust database)
+        # This is a placeholder - trust_level would be checked against
+        # a trust database that tracks device trust scores
+        if condition.trust_level is not None:
+            # For now, all devices are "unknown" trust level
+            # A real implementation would look up device trust in a database
+            device_trust = "unknown"
+            if condition.trust_level != device_trust:
                 return False
 
         # All conditions passed
@@ -199,6 +275,26 @@ class RuleMatcher:
             intf.interface_class == class_code
             for intf in device.interfaces
         )
+
+    def _matches_any_class(self, device: DeviceDescriptor, class_codes: list[int]) -> bool:
+        """Check if device matches any of the specified classes."""
+        # Check device class
+        if device.device_class in class_codes:
+            return True
+        # Check interface classes
+        return any(
+            intf.interface_class in class_codes
+            for intf in device.interfaces
+        )
+
+    def _has_bulk_endpoint(self, device: DeviceDescriptor) -> bool:
+        """Check if device has any bulk transfer endpoints."""
+        BULK_TRANSFER = 0x02  # USB bulk transfer type
+        for intf in device.interfaces:
+            for ep in intf.endpoints:
+                if ep.transfer_type == BULK_TRANSFER:
+                    return True
+        return False
 
     def _matches_regex(self, pattern: str, value: str) -> bool:
         """Match value against regex pattern (cached)."""
