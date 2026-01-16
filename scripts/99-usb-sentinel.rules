@@ -1,0 +1,75 @@
+# USB Sentinel udev rules
+# =========================
+# These rules intercept USB device events before driver binding.
+#
+# Installation:
+#   sudo cp 99-usb-sentinel.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules
+#
+# Note: These rules require USB Sentinel to be installed at /opt/usb-sentinel
+# or the paths need to be adjusted.
+
+# ------------------------------------------------------------------------------
+# Default USB device authorization policy
+# ------------------------------------------------------------------------------
+# By default, new USB devices are not authorized (drivers won't bind)
+# USB Sentinel will authorize devices after analysis
+
+# Deauthorize all new USB devices by default (commented out - enable for strict mode)
+# ACTION=="add", SUBSYSTEM=="usb", ATTR{authorized}="0"
+
+# ------------------------------------------------------------------------------
+# USB Sentinel intercept hook
+# ------------------------------------------------------------------------------
+# Call USB Sentinel intercept script on device add events
+# The script receives the kernel device name (%k) and sysfs path (%p)
+
+ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", \
+    RUN+="/opt/usb-sentinel/bin/usb-sentinel-intercept %k %p"
+
+# ------------------------------------------------------------------------------
+# USB Sentinel notification on remove
+# ------------------------------------------------------------------------------
+# Notify USB Sentinel when devices are removed for audit logging
+
+ACTION=="remove", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", \
+    RUN+="/opt/usb-sentinel/bin/usb-sentinel-notify remove %k"
+
+# ------------------------------------------------------------------------------
+# Trusted device classes (optional fast-path)
+# ------------------------------------------------------------------------------
+# Uncomment these rules to automatically allow certain device classes
+# WARNING: This bypasses USB Sentinel analysis for these classes
+
+# Allow USB hubs automatically (they don't pose direct threat)
+# ACTION=="add", SUBSYSTEM=="usb", ATTR{bDeviceClass}=="09", ATTR{authorized}="1"
+
+# Allow USB audio devices automatically
+# ACTION=="add", SUBSYSTEM=="usb", ATTR{bDeviceClass}=="01", ATTR{authorized}="1"
+
+# ------------------------------------------------------------------------------
+# Known safe devices (whitelist by VID:PID)
+# ------------------------------------------------------------------------------
+# Uncomment and modify these rules to whitelist specific devices
+# This provides faster authorization for known-good devices
+
+# Example: Logitech Unifying Receiver
+# ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="046d", ATTR{idProduct}=="c534", \
+#     ATTR{authorized}="1", RUN+="/opt/usb-sentinel/bin/usb-sentinel-notify allow %k"
+
+# Example: Intel Bluetooth
+# ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="8087", \
+#     ATTR{authorized}="1", RUN+="/opt/usb-sentinel/bin/usb-sentinel-notify allow %k"
+
+# ------------------------------------------------------------------------------
+# Known malicious devices (blacklist by VID:PID)
+# ------------------------------------------------------------------------------
+# Block known attack devices immediately without analysis
+
+# CH340 serial adapter (common in attack hardware)
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="1a86", ATTR{idProduct}=="7523", \
+    ATTR{authorized}="0", RUN+="/opt/usb-sentinel/bin/usb-sentinel-notify block %k 'Known attack hardware signature'"
+
+# STM32 DFU mode (firmware update - high risk)
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0483", ATTR{idProduct}=="df11", \
+    ATTR{authorized}="0", RUN+="/opt/usb-sentinel/bin/usb-sentinel-notify block %k 'DFU mode device blocked'"

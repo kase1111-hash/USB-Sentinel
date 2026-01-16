@@ -11,10 +11,39 @@ from sentinel.interceptor.descriptors import (
     InterfaceDescriptor,
     extract_device_info,
 )
+from sentinel.interceptor.events import (
+    EventDispatcher,
+    EventProcessor,
+    EventQueue,
+    ProcessedEvent,
+)
+from sentinel.interceptor.linux import (
+    DeviceAuthorizer,
+    EventType,
+    USBEnumerator,
+    USBEvent,
+    USBInterceptor,
+    USBMonitor,
+    get_platform_interceptor,
+)
 
 __all__ = [
+    # Descriptors
     "DeviceDescriptor",
     "InterfaceDescriptor",
     "EndpointDescriptor",
     "extract_device_info",
+    # Events
+    "EventDispatcher",
+    "EventProcessor",
+    "EventQueue",
+    "ProcessedEvent",
+    # Linux interceptor
+    "DeviceAuthorizer",
+    "EventType",
+    "USBEnumerator",
+    "USBEvent",
+    "USBInterceptor",
+    "USBMonitor",
+    "get_platform_interceptor",
 ]
