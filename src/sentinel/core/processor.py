@@ -112,7 +112,7 @@ class DeviceProcessor:
     """
     Integrated device processing pipeline.
 
-    Coordinates policy evaluation, validation, and audit logging
+    Coordinates policy evaluation, validation, LLM analysis, and audit logging
     to produce a final verdict for each device.
     """
 
@@ -121,9 +121,11 @@ class DeviceProcessor:
         policy_engine: PolicyEngine,
         audit_db: AuditDatabase | None = None,
         fingerprint_db: FingerprintDatabase | None = None,
+        analyzer: Any | None = None,
         review_threshold: int = 50,
         block_threshold: int = 75,
         sandbox_threshold: int = 60,
+        auto_llm_analysis: bool = False,
     ) -> None:
         """
         Initialize the device processor.
@@ -132,13 +134,17 @@ class DeviceProcessor:
             policy_engine: Policy engine for rule evaluation
             audit_db: Audit database for logging (optional)
             fingerprint_db: Fingerprint database for tracking
+            analyzer: LLM analyzer for threat analysis (optional)
             review_threshold: Risk score threshold for LLM review
             block_threshold: Risk score threshold for blocking
             sandbox_threshold: Risk score threshold for sandboxing
+            auto_llm_analysis: Automatically run LLM analysis when requires_llm=True
         """
         self.policy_engine = policy_engine
         self.audit_db = audit_db
         self.fingerprint_db = fingerprint_db or FingerprintDatabase()
+        self.analyzer = analyzer
+        self.auto_llm_analysis = auto_llm_analysis
 
         self.review_threshold = review_threshold
         self.block_threshold = block_threshold
@@ -251,7 +257,7 @@ class DeviceProcessor:
         """
         Process a device asynchronously.
 
-        Allows for async post-processing hooks (e.g., LLM analysis).
+        Allows for async post-processing hooks and automatic LLM analysis.
 
         Args:
             device: Device descriptor to process
@@ -262,6 +268,14 @@ class DeviceProcessor:
         # Run sync processing
         result = self.process(device)
 
+        # Automatic LLM analysis if enabled and required
+        if self.auto_llm_analysis and result.requires_llm and self.analyzer:
+            try:
+                result = await self.analyze_with_llm_async(result)
+            except Exception as e:
+                logger.error("Auto LLM analysis failed: %s", e)
+                # Keep original verdict but log the failure
+
         # Run async post-process hooks
         for hook in self._async_post_hooks:
             try:
@@ -270,6 +284,104 @@ class DeviceProcessor:
                 logger.error("Async post-process hook error: %s", e)
 
         return result
+
+    def analyze_with_llm(self, result: ProcessingResult) -> ProcessingResult:
+        """
+        Perform LLM analysis on a device that requires review.
+
+        Args:
+            result: Initial processing result with requires_llm=True
+
+        Returns:
+            Updated ProcessingResult with LLM analysis
+        """
+        if not self.analyzer:
+            logger.warning("LLM analysis requested but no analyzer configured")
+            return result
+
+        try:
+            # Get device history if audit_db available
+            history = None
+            similar_devices = None
+            if self.audit_db:
+                try:
+                    history = self.audit_db.get_device_events(
+                        result.fingerprint, limit=10
+                    )
+                    similar_devices = self.audit_db.get_events_by_vid_pid(
+                        result.device.vid, result.device.pid, limit=5
+                    )
+                except Exception as e:
+                    logger.debug("Could not fetch history: %s", e)
+
+            # Run LLM analysis
+            llm_result = self.analyzer.analyze(
+                result.device,
+                history=history,
+                similar_devices=similar_devices,
+            )
+
+            # Update result with LLM verdict
+            return self.update_verdict_with_llm(
+                result,
+                llm_result.risk_score,
+                llm_result.analysis,
+            )
+
+        except Exception as e:
+            logger.error("LLM analysis failed: %s", e)
+            result.llm_analysis = f"Analysis failed: {e}"
+            return result
+
+    async def analyze_with_llm_async(
+        self, result: ProcessingResult
+    ) -> ProcessingResult:
+        """
+        Perform async LLM analysis on a device that requires review.
+
+        Args:
+            result: Initial processing result with requires_llm=True
+
+        Returns:
+            Updated ProcessingResult with LLM analysis
+        """
+        if not self.analyzer:
+            logger.warning("LLM analysis requested but no analyzer configured")
+            return result
+
+        try:
+            # Get device history if audit_db available
+            history = None
+            similar_devices = None
+            if self.audit_db:
+                try:
+                    history = self.audit_db.get_device_events(
+                        result.fingerprint, limit=10
+                    )
+                    similar_devices = self.audit_db.get_events_by_vid_pid(
+                        result.device.vid, result.device.pid, limit=5
+                    )
+                except Exception as e:
+                    logger.debug("Could not fetch history: %s", e)
+
+            # Run async LLM analysis
+            llm_result = await self.analyzer.analyze_async(
+                result.device,
+                history=history,
+                similar_devices=similar_devices,
+            )
+
+            # Update result with LLM verdict
+            return self.update_verdict_with_llm(
+                result,
+                llm_result.risk_score,
+                llm_result.analysis,
+            )
+
+        except Exception as e:
+            logger.error("Async LLM analysis failed: %s", e)
+            result.llm_analysis = f"Analysis failed: {e}"
+            return result
 
     def _compute_risk_score(
         self,
@@ -571,6 +683,10 @@ class PolicyWatcher:
 def create_processor(
     policy_path: str | Path | None = None,
     db_path: str | Path | None = None,
+    analyzer: Any | None = None,
+    api_key: str | None = None,
+    use_mock_analyzer: bool = False,
+    auto_llm_analysis: bool = False,
 ) -> DeviceProcessor:
     """
     Create a fully configured device processor.
@@ -578,6 +694,10 @@ def create_processor(
     Args:
         policy_path: Path to policy YAML file (uses default if None)
         db_path: Path to audit database (uses memory if None)
+        analyzer: Pre-configured LLM analyzer (optional)
+        api_key: Anthropic API key for creating LLM analyzer
+        use_mock_analyzer: Use mock analyzer for testing
+        auto_llm_analysis: Automatically run LLM for devices requiring review
 
     Returns:
         Configured DeviceProcessor
@@ -595,7 +715,21 @@ def create_processor(
     if db_path:
         audit_db = AuditDatabase(db_path)
 
+    # Create analyzer if not provided
+    if analyzer is None and (api_key or use_mock_analyzer):
+        try:
+            from sentinel.analyzer import create_analyzer
+            analyzer = create_analyzer(
+                api_key=api_key,
+                use_mock=use_mock_analyzer,
+            )
+        except Exception as e:
+            logger.warning("Failed to create analyzer: %s", e)
+            analyzer = None
+
     return DeviceProcessor(
         policy_engine=policy_engine,
         audit_db=audit_db,
+        analyzer=analyzer,
+        auto_llm_analysis=auto_llm_analysis,
     )
