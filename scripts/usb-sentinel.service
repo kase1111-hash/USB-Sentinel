@@ -1,0 +1,51 @@
+[Unit]
+Description=USB Sentinel - LLM-integrated USB Firewall
+Documentation=https://github.com/usb-sentinel/docs
+After=network.target local-fs.target
+Wants=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 -m sentinel.daemon -c /etc/usb-sentinel/sentinel.yaml -f
+ExecReload=/bin/kill -HUP $MAINPID
+ExecStop=/bin/kill -TERM $MAINPID
+
+# Security hardening
+User=root
+Group=root
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+
+# Allow access to USB devices and sysfs
+ReadWritePaths=/var/lib/usb-sentinel
+ReadWritePaths=/var/log
+ReadOnlyPaths=/etc/usb-sentinel
+PrivateDevices=no
+
+# Environment
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/etc/usb-sentinel/environment
+
+# Restart policy
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=usb-sentinel
+
+# Resource limits
+LimitNOFILE=65535
+MemoryMax=512M
+CPUQuota=50%
+
+[Install]
+WantedBy=multi-user.target
