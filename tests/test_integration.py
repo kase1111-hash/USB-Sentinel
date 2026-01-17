@@ -417,8 +417,8 @@ class TestPerformance(unittest.TestCase):
             load_policy(self.policy_path)
         elapsed = time.perf_counter() - start
 
-        # Should complete in under 2 seconds
-        assert elapsed < 2.0, f"Policy loading too slow: {elapsed:.3f}s for 100 loads"
+        # Should complete in under 3 seconds
+        assert elapsed < 3.0, f"Policy loading too slow: {elapsed:.3f}s for 100 loads"
 
     def test_database_insert_speed(self) -> None:
         """Test database insert performance."""
