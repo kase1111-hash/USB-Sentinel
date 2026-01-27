@@ -66,17 +66,22 @@ class APIKey:
         return permission in self.permissions or "admin" in self.permissions
 
 
-def hash_api_key(key: str) -> str:
+def hash_api_key(key: str, salt: str | None = None) -> str:
     """
-    Hash an API key for secure storage.
+    Hash an API key for secure storage using HMAC-SHA256 with salt.
 
     Args:
         key: Plain text API key
+        salt: Optional salt (uses key prefix if not provided for consistency)
 
     Returns:
-        SHA-256 hash of the key
+        HMAC-SHA256 hash of the key with salt
     """
-    return hashlib.sha256(key.encode()).hexdigest()
+    # Use key prefix as salt for backward compatibility and consistency
+    # This ensures the same key always produces the same hash
+    if salt is None:
+        salt = key[:8] if len(key) >= 8 else key
+    return hmac.new(salt.encode(), key.encode(), hashlib.sha256).hexdigest()
 
 
 def generate_api_key() -> tuple[str, str]:
