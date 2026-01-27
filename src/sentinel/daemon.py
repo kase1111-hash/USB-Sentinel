@@ -105,7 +105,7 @@ class SentinelDaemon:
             policy_path = Path(self.config.policy.rules_file)
             if policy_path.exists():
                 policy = load_policy(policy_path)
-                self._policy_engine = PolicyEngine(policy.rules)
+                self._policy_engine = PolicyEngine(policy=policy)
             else:
                 logger.warning(f"Policy file not found: {policy_path}, using empty policy")
                 self._policy_engine = PolicyEngine([])
@@ -249,7 +249,9 @@ class SentinelDaemon:
                 logger.info(f"New device registered: {fingerprint}")
 
             # Layer 2: Policy evaluation
-            action, rule = self.policy_engine.evaluate(descriptor, self.db)
+            eval_result = self.policy_engine.evaluate(descriptor)
+            action = eval_result.action
+            rule = eval_result.matched_rule
             result["action"] = action.value
             result["rule"] = rule.comment if rule else None
 

@@ -567,8 +567,8 @@ class DeviceProcessor:
         Returns:
             Updated ProcessingResult
         """
-        # Combine scores
-        combined_score = (result.risk_score + llm_score) // 2
+        # Combine scores (use round() to avoid precision loss from floor division)
+        combined_score = round((result.risk_score + llm_score) / 2)
         result.risk_score = combined_score
         result.llm_analysis = llm_analysis
 

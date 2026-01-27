@@ -479,7 +479,7 @@ def cmd_policy(args: argparse.Namespace) -> int:
             return 1
 
         policy = load_policy(policy_path)
-        engine = PolicyEngine(policy.rules)
+        engine = PolicyEngine(policy=policy)
 
         # Create test descriptor
         descriptor = DeviceDescriptor(
@@ -493,7 +493,9 @@ def cmd_policy(args: argparse.Namespace) -> int:
         )
 
         # Evaluate
-        action, rule = engine.evaluate(descriptor, None)
+        eval_result = engine.evaluate(descriptor)
+        action = eval_result.action
+        rule = eval_result.matched_rule
 
         result = {
             "device": f"{args.vid}:{args.pid}",
