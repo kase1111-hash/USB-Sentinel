@@ -15,7 +15,7 @@ import logging
 import secrets
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Callable
 
 from fastapi import HTTPException, Request, Security, status
@@ -50,7 +50,7 @@ class APIKey:
 
     key_hash: str
     name: str
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     expires_at: datetime | None = None
     permissions: list[str] = field(default_factory=lambda: ["read"])
     rate_limit: int = 60  # requests per minute
@@ -59,7 +59,12 @@ class APIKey:
         """Check if key has expired."""
         if self.expires_at is None:
             return False
-        return datetime.utcnow() > self.expires_at
+        now = datetime.now(timezone.utc)
+        # Handle both naive and aware datetimes for compatibility
+        if self.expires_at.tzinfo is None:
+            # Treat naive datetime as UTC
+            return now.replace(tzinfo=None) > self.expires_at
+        return now > self.expires_at
 
     def has_permission(self, permission: str) -> bool:
         """Check if key has specific permission."""
@@ -472,7 +477,7 @@ class ClientCertificate:
 
     def is_valid(self) -> bool:
         """Check if certificate is currently valid."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         return self.not_before <= now <= self.not_after
 
 

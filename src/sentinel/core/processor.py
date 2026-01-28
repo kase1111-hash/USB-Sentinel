@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Coroutine
@@ -172,7 +172,7 @@ class DeviceProcessor:
         Returns:
             ProcessingResult with final verdict
         """
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
 
         # Generate fingerprint
         fingerprint = generate_fingerprint(device)
@@ -202,7 +202,7 @@ class DeviceProcessor:
         )
 
         # Calculate processing time
-        processing_time = (datetime.utcnow() - start_time).total_seconds() * 1000
+        processing_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
 
         # Create result
         result = ProcessingResult(
@@ -228,7 +228,7 @@ class DeviceProcessor:
                     vid=device.vid,
                     pid=device.pid,
                     components=[],
-                    created_at=datetime.utcnow(),
+                    created_at=datetime.now(timezone.utc),
                 )
                 fp.add(fp_obj)
 
@@ -704,16 +704,31 @@ def create_processor(
     """
     from sentinel.policy.engine import create_default_policy
 
-    # Create policy engine
-    if policy_path:
-        policy_engine = PolicyEngine.from_file(policy_path)
-    else:
-        policy_engine = PolicyEngine(policy=create_default_policy())
-
-    # Create audit database
+    # Create audit database first (needed for trust_lookup)
     audit_db = None
     if db_path:
         audit_db = AuditDatabase(db_path)
+
+    # Create trust lookup function if audit_db is available
+    def trust_lookup(fingerprint: str) -> str | None:
+        if audit_db is None:
+            return None
+        device = audit_db.get_device(fingerprint)
+        if device is None:
+            return None
+        return device.trust_level
+
+    # Create policy engine with trust lookup
+    if policy_path:
+        policy_engine = PolicyEngine.from_file(
+            policy_path,
+            trust_lookup=trust_lookup if audit_db else None,
+        )
+    else:
+        policy_engine = PolicyEngine(
+            policy=create_default_policy(),
+            trust_lookup=trust_lookup if audit_db else None,
+        )
 
     # Create analyzer if not provided
     if analyzer is None and (api_key or use_mock_analyzer):

@@ -13,7 +13,7 @@ import logging
 import os
 import shutil
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Generator, Sequence
 
@@ -256,7 +256,7 @@ class AuditDatabase:
                 logger.info("Added new device: %s", fingerprint)
             else:
                 # Update last seen
-                device.last_seen = datetime.utcnow()
+                device.last_seen = datetime.now(timezone.utc)
                 if manufacturer and not device.manufacturer:
                     device.manufacturer = manufacturer
                 if product and not device.product:
@@ -328,6 +328,83 @@ class AuditDatabase:
                 query = query.filter(Device.trust_level == trust_level)
             return query.scalar()
 
+    def list_devices(
+        self,
+        filters: dict[str, Any] | None = None,
+        offset: int = 0,
+        limit: int | None = 50,
+    ) -> tuple[list[Device], int]:
+        """
+        List devices with filters and pagination.
+
+        Args:
+            filters: Dictionary of filter conditions (trust_level, etc.)
+            offset: Number of results to skip
+            limit: Maximum number of results
+
+        Returns:
+            Tuple of (list of devices, total count)
+        """
+        filters = filters or {}
+
+        with self.session() as session:
+            query = session.query(Device)
+
+            # Apply filters
+            if "trust_level" in filters:
+                query = query.filter(Device.trust_level == filters["trust_level"])
+            if "vid" in filters:
+                query = query.filter(Device.vid == filters["vid"].lower())
+            if "pid" in filters:
+                query = query.filter(Device.pid == filters["pid"].lower())
+            if "manufacturer" in filters:
+                query = query.filter(
+                    Device.manufacturer.ilike(f"%{filters['manufacturer']}%")
+                )
+            if "product" in filters:
+                query = query.filter(
+                    Device.product.ilike(f"%{filters['product']}%")
+                )
+
+            # Get total count before pagination
+            total = query.count()
+
+            # Apply ordering and pagination
+            query = query.order_by(Device.last_seen.desc())
+            if offset:
+                query = query.offset(offset)
+            if limit:
+                query = query.limit(limit)
+
+            devices = query.all()
+            for d in devices:
+                session.expunge(d)
+
+            return devices, total
+
+    def update_device_notes(self, fingerprint: str, notes: str | None) -> bool:
+        """
+        Update device notes.
+
+        Args:
+            fingerprint: Device fingerprint
+            notes: New notes value
+
+        Returns:
+            True if device was found and updated
+        """
+        with self.session() as session:
+            device = session.query(Device).filter(
+                Device.fingerprint == fingerprint
+            ).first()
+
+            if device is None:
+                return False
+
+            device.notes = notes
+            logger.info("Updated notes for device %s", fingerprint)
+            return True
+
     # =========================================================================
     # Event Operations
     # =========================================================================
@@ -373,7 +450,7 @@ class AuditDatabase:
                 raise ValueError(f"Device not found: {device_fingerprint}")
 
             # Update device last_seen
-            device.last_seen = datetime.utcnow()
+            device.last_seen = datetime.now(timezone.utc)
 
             event = Event(
                 device_fingerprint=device_fingerprint,
@@ -460,7 +537,7 @@ class AuditDatabase:
         Returns:
             List of recent events
         """
-        since = datetime.utcnow() - timedelta(hours=hours)
+        since = datetime.now(timezone.utc) - timedelta(hours=hours)
         return self.get_events(since=since, limit=limit)
 
     def count_events(
@@ -494,6 +571,158 @@ class AuditDatabase:
 
             return query.scalar()
 
+    def list_events(
+        self,
+        filters: dict[str, Any] | None = None,
+        offset: int = 0,
+        limit: int | None = 50,
+    ) -> tuple[list[Event], int]:
+        """
+        List events with filters and pagination.
+
+        Args:
+            filters: Dictionary of filter conditions
+            offset: Number of results to skip
+            limit: Maximum number of results
+
+        Returns:
+            Tuple of (list of events, total count)
+        """
+        filters = filters or {}
+
+        with self.session() as session:
+            query = session.query(Event)
+
+            # Apply filters
+            if "device_fingerprint" in filters:
+                query = query.filter(
+                    Event.device_fingerprint == filters["device_fingerprint"]
+                )
+            if "event_type" in filters:
+                query = query.filter(Event.event_type == filters["event_type"])
+            if "since" in filters:
+                query = query.filter(Event.timestamp >= filters["since"])
+            if "until" in filters:
+                query = query.filter(Event.timestamp <= filters["until"])
+            if "min_risk_score" in filters:
+                query = query.filter(Event.risk_score >= filters["min_risk_score"])
+            if "verdict" in filters:
+                query = query.filter(Event.verdict == filters["verdict"])
+
+            # Get total count before pagination
+            total = query.count()
+
+            # Apply ordering and pagination
+            query = query.order_by(Event.timestamp.desc())
+            if offset:
+                query = query.offset(offset)
+            if limit:
+                query = query.limit(limit)
+
+            events = query.all()
+            for e in events:
+                session.expunge(e)
+
+            return events, total
+
+    def get_event(self, event_id: int) -> Event | None:
+        """
+        Get a single event by ID.
+
+        Args:
+            event_id: Event ID
+
+        Returns:
+            Event or None if not found
+        """
+        with self.session() as session:
+            event = session.query(Event).filter(Event.id == event_id).first()
+            if event:
+                session.expunge(event)
+            return event
+
+    def get_device_events(
+        self,
+        fingerprint: str,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        """
+        Get recent events for a specific device.
+
+        Args:
+            fingerprint: Device fingerprint
+            limit: Maximum number of events
+
+        Returns:
+            List of event dictionaries with relevant fields
+        """
+        with self.session() as session:
+            events = (
+                session.query(Event)
+                .filter(Event.device_fingerprint == fingerprint)
+                .order_by(Event.timestamp.desc())
+                .limit(limit)
+                .all()
+            )
+
+            return [
+                {
+                    "timestamp": e.timestamp.isoformat() if e.timestamp else None,
+                    "event_type": e.event_type,
+                    "verdict": e.verdict,
+                    "risk_score": e.risk_score,
+                }
+                for e in events
+            ]
+
+    def get_events_by_vid_pid(
+        self,
+        vid: str,
+        pid: str,
+        limit: int = 5,
+    ) -> list[dict[str, Any]]:
+        """
+        Get recent events for devices matching VID:PID.
+
+        Args:
+            vid: Vendor ID
+            pid: Product ID
+            limit: Maximum number of events
+
+        Returns:
+            List of event dictionaries
+        """
+        with self.session() as session:
+            # Get fingerprints for matching devices
+            devices = (
+                session.query(Device.fingerprint)
+                .filter(Device.vid == vid.lower(), Device.pid == pid.lower())
+                .all()
+            )
+            fingerprints = [d.fingerprint for d in devices]
+
+            if not fingerprints:
+                return []
+
+            events = (
+                session.query(Event)
+                .filter(Event.device_fingerprint.in_(fingerprints))
+                .order_by(Event.timestamp.desc())
+                .limit(limit)
+                .all()
+            )
+
+            return [
+                {
+                    "timestamp": e.timestamp.isoformat() if e.timestamp else None,
+                    "event_type": e.event_type,
+                    "verdict": e.verdict,
+                    "risk_score": e.risk_score,
+                    "device_fingerprint": e.device_fingerprint,
+                }
+                for e in events
+            ]
+
     # =========================================================================
     # Statistics
     # =========================================================================
@@ -526,7 +755,7 @@ class AuditDatabase:
                 event_counts[etype.value] = count
 
             # Recent activity
-            last_24h = datetime.utcnow() - timedelta(hours=24)
+            last_24h = datetime.now(timezone.utc) - timedelta(hours=24)
             recent_events = session.query(func.count(Event.id)).filter(
                 Event.timestamp >= last_24h
             ).scalar()
@@ -547,6 +776,115 @@ class AuditDatabase:
                 "database_size_bytes": self.db_path.stat().st_size if self.db_path.exists() else 0,
             }
 
+    def get_system_statistics(self) -> dict[str, Any]:
+        """
+        Get system-wide statistics for API.
+
+        Returns:
+            Dictionary with system statistics
+        """
+        with self.session() as session:
+            total_devices = session.query(func.count(Device.id)).scalar()
+            total_events = session.query(func.count(Event.id)).scalar()
+
+            # Trust level counts
+            trusted_devices = session.query(func.count(Device.id)).filter(
+                Device.trust_level == TrustLevel.TRUSTED.value
+            ).scalar()
+            blocked_devices = session.query(func.count(Device.id)).filter(
+                Device.trust_level == TrustLevel.BLOCKED.value
+            ).scalar()
+            unknown_devices = session.query(func.count(Device.id)).filter(
+                Device.trust_level == TrustLevel.UNKNOWN.value
+            ).scalar()
+
+            # Time-based statistics
+            now = datetime.now(timezone.utc)
+            today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            week_start = today_start - timedelta(days=now.weekday())
+
+            events_today = session.query(func.count(Event.id)).filter(
+                Event.timestamp >= today_start
+            ).scalar()
+
+            events_this_week = session.query(func.count(Event.id)).filter(
+                Event.timestamp >= week_start
+            ).scalar()
+
+            blocked_today = session.query(func.count(Event.id)).filter(
+                Event.timestamp >= today_start,
+                Event.event_type == EventType.BLOCKED.value,
+            ).scalar()
+
+            allowed_today = session.query(func.count(Event.id)).filter(
+                Event.timestamp >= today_start,
+                Event.event_type == EventType.ALLOWED.value,
+            ).scalar()
+
+            # Average risk score
+            avg_risk = session.query(func.avg(Event.risk_score)).filter(
+                Event.risk_score.isnot(None)
+            ).scalar()
+
+            return {
+                "total_devices": total_devices,
+                "trusted_devices": trusted_devices,
+                "blocked_devices": blocked_devices,
+                "unknown_devices": unknown_devices,
+                "total_events": total_events,
+                "events_today": events_today,
+                "events_this_week": events_this_week,
+                "average_risk_score": round(avg_risk, 1) if avg_risk else None,
+                "blocked_today": blocked_today,
+                "allowed_today": allowed_today,
+            }
+
+    def get_device_statistics(self, fingerprint: str) -> dict[str, Any]:
+        """
+        Get statistics for a specific device.
+
+        Args:
+            fingerprint: Device fingerprint
+
+        Returns:
+            Dictionary with device statistics
+        """
+        with self.session() as session:
+            device = session.query(Device).filter(
+                Device.fingerprint == fingerprint
+            ).first()
+
+            if device is None:
+                return {}
+
+            # Count events by type
+            event_count = session.query(func.count(Event.id)).filter(
+                Event.device_fingerprint == fingerprint
+            ).scalar()
+
+            times_blocked = session.query(func.count(Event.id)).filter(
+                Event.device_fingerprint == fingerprint,
+                Event.event_type == EventType.BLOCKED.value,
+            ).scalar()
+
+            times_allowed = session.query(func.count(Event.id)).filter(
+                Event.device_fingerprint == fingerprint,
+                Event.event_type == EventType.ALLOWED.value,
+            ).scalar()
+
+            # Average risk score for this device
+            avg_risk = session.query(func.avg(Event.risk_score)).filter(
+                Event.device_fingerprint == fingerprint,
+                Event.risk_score.isnot(None),
+            ).scalar()
+
+            return {
+                "event_count": event_count,
+                "times_blocked": times_blocked,
+                "times_allowed": times_allowed,
+                "average_risk_score": round(avg_risk, 1) if avg_risk else None,
+            }
+
     # =========================================================================
     # Export & Backup
     # =========================================================================
@@ -563,7 +901,7 @@ class AuditDatabase:
             events = session.query(Event).all()
 
             data = {
-                "exported_at": datetime.utcnow().isoformat(),
+                "exported_at": datetime.now(timezone.utc).isoformat(),
                 "devices": [d.to_dict() for d in devices],
                 "events": [e.to_dict() for e in events],
             }
@@ -584,7 +922,7 @@ class AuditDatabase:
             Path to backup file
         """
         if backup_path is None:
-            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
             backup_path = self.db_path.parent / f"{self.db_path.stem}_backup_{timestamp}.db"
 
         backup_path = Path(backup_path)
