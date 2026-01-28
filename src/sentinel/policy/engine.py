@@ -206,12 +206,12 @@ class RuleMatcher:
 
         # Is keyboard
         if condition.is_keyboard is not None:
-            if condition.is_keyboard != device.is_keyboard:
+            if condition.is_keyboard != device.has_keyboard:
                 return False
 
         # Is mouse
         if condition.is_mouse is not None:
-            if condition.is_mouse != device.is_mouse:
+            if condition.is_mouse != device.has_mouse:
                 return False
 
         # Endpoint count > N

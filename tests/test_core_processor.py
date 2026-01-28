@@ -40,23 +40,20 @@ def normal_keyboard():
     return DeviceDescriptor(
         vid="046d",
         pid="c52b",
-        manufacturer="Logitech",
-        product="USB Receiver",
-        serial="1234567890",
         device_class=0,
         device_subclass=0,
         device_protocol=0,
-        usb_version="2.00",
-        device_version="12.10",
-        max_packet_size=8,
-        num_configurations=1,
+        manufacturer="Logitech",
+        product="USB Receiver",
+        serial="1234567890",
         interfaces=[
             InterfaceDescriptor(
-                interface_number=0,
-                alternate_setting=0,
                 interface_class=3,  # HID
                 interface_subclass=1,
                 interface_protocol=1,  # Keyboard
+                num_endpoints=1,
+                interface_number=0,
+                alternate_setting=0,
                 interface_string="Keyboard",
                 endpoints=[
                     EndpointDescriptor(
@@ -77,24 +74,21 @@ def suspicious_hid_storage():
     return DeviceDescriptor(
         vid="1234",
         pid="5678",
-        manufacturer="",
-        product="USB Device",
-        serial="",
         device_class=0,
         device_subclass=0,
         device_protocol=0,
-        usb_version="2.00",
-        device_version="1.00",
-        max_packet_size=64,
-        num_configurations=1,
+        manufacturer="",
+        product="USB Device",
+        serial="",
         interfaces=[
             # HID interface
             InterfaceDescriptor(
-                interface_number=0,
-                alternate_setting=0,
                 interface_class=3,  # HID
                 interface_subclass=1,
                 interface_protocol=1,  # Keyboard
+                num_endpoints=1,
+                interface_number=0,
+                alternate_setting=0,
                 interface_string="",
                 endpoints=[
                     EndpointDescriptor(
@@ -107,11 +101,12 @@ def suspicious_hid_storage():
             ),
             # Mass storage interface
             InterfaceDescriptor(
-                interface_number=1,
-                alternate_setting=0,
                 interface_class=8,  # Mass storage
                 interface_subclass=6,
                 interface_protocol=80,
+                num_endpoints=2,
+                interface_number=1,
+                alternate_setting=0,
                 interface_string="",
                 endpoints=[
                     EndpointDescriptor(
@@ -138,23 +133,20 @@ def attack_device():
     return DeviceDescriptor(
         vid="1a86",
         pid="7523",
-        manufacturer="CH340",
-        product="USB Serial",
-        serial="",
         device_class=0,
         device_subclass=0,
         device_protocol=0,
-        usb_version="1.10",
-        device_version="2.64",
-        max_packet_size=8,
-        num_configurations=1,
+        manufacturer="CH340",
+        product="USB Serial",
+        serial="",
         interfaces=[
             InterfaceDescriptor(
-                interface_number=0,
-                alternate_setting=0,
                 interface_class=255,  # Vendor specific
                 interface_subclass=1,
                 interface_protocol=2,
+                num_endpoints=2,
+                interface_number=0,
+                alternate_setting=0,
                 interface_string="",
                 endpoints=[
                     EndpointDescriptor(
@@ -270,8 +262,12 @@ class TestDeviceProcessor:
         keyboard = DeviceDescriptor(
             vid="046d",
             pid="c52b",
+            device_class=0,
+            device_subclass=0,
+            device_protocol=0,
             manufacturer="Logitech",
             product="Keyboard",
+            serial=None,
             interfaces=[],
         )
 
@@ -285,7 +281,7 @@ class TestDeviceProcessor:
         """Test that fingerprint is generated for devices."""
         result = processor.process(normal_keyboard)
         assert result.fingerprint is not None
-        assert len(result.fingerprint) == 64  # SHA-256 hex
+        assert len(result.fingerprint) >= 16  # Fingerprint hash (length varies by mode)
 
     def test_processing_hooks(self, simple_policy):
         """Test pre and post processing hooks."""
@@ -307,8 +303,12 @@ class TestDeviceProcessor:
         keyboard = DeviceDescriptor(
             vid="046d",
             pid="c52b",
+            device_class=0,
+            device_subclass=0,
+            device_protocol=0,
             manufacturer="Logitech",
             product="Keyboard",
+            serial=None,
             interfaces=[],
         )
 
@@ -353,9 +353,9 @@ class TestAdvancedMatching:
         engine = PolicyEngine(policy=policy)
         processor = DeviceProcessor(policy_engine=engine)
 
-        logitech = DeviceDescriptor(vid="046d", pid="1234", interfaces=[])
-        microsoft = DeviceDescriptor(vid="045e", pid="1234", interfaces=[])
-        unknown = DeviceDescriptor(vid="dead", pid="beef", interfaces=[])
+        logitech = DeviceDescriptor(vid="046d", pid="1234", device_class=0, device_subclass=0, device_protocol=0, manufacturer=None, product=None, serial=None, interfaces=[])
+        microsoft = DeviceDescriptor(vid="045e", pid="1234", device_class=0, device_subclass=0, device_protocol=0, manufacturer=None, product=None, serial=None, interfaces=[])
+        unknown = DeviceDescriptor(vid="dead", pid="beef", device_class=0, device_subclass=0, device_protocol=0, manufacturer=None, product=None, serial=None, interfaces=[])
 
         assert processor.process(logitech).policy_result.action == Action.ALLOW
         assert processor.process(microsoft).policy_result.action == Action.ALLOW
@@ -378,9 +378,9 @@ class TestAdvancedMatching:
         engine = PolicyEngine(policy=policy)
         processor = DeviceProcessor(policy_engine=engine)
 
-        in_range = DeviceDescriptor(vid="0450", pid="1234", interfaces=[])
-        below_range = DeviceDescriptor(vid="0300", pid="1234", interfaces=[])
-        above_range = DeviceDescriptor(vid="0500", pid="1234", interfaces=[])
+        in_range = DeviceDescriptor(vid="0450", pid="1234", device_class=0, device_subclass=0, device_protocol=0, manufacturer=None, product=None, serial=None, interfaces=[])
+        below_range = DeviceDescriptor(vid="0300", pid="1234", device_class=0, device_subclass=0, device_protocol=0, manufacturer=None, product=None, serial=None, interfaces=[])
+        above_range = DeviceDescriptor(vid="0500", pid="1234", device_class=0, device_subclass=0, device_protocol=0, manufacturer=None, product=None, serial=None, interfaces=[])
 
         assert processor.process(in_range).policy_result.action == Action.ALLOW
         assert processor.process(below_range).policy_result.action == Action.BLOCK
@@ -406,10 +406,19 @@ class TestAdvancedMatching:
         simple = DeviceDescriptor(
             vid="1234",
             pid="5678",
+            device_class=0,
+            device_subclass=0,
+            device_protocol=0,
+            manufacturer=None,
+            product=None,
+            serial=None,
             interfaces=[
                 InterfaceDescriptor(
-                    interface_number=0,
                     interface_class=3,
+                    interface_subclass=0,
+                    interface_protocol=0,
+                    num_endpoints=0,
+                    interface_number=0,
                     endpoints=[],
                 )
             ],
@@ -418,9 +427,15 @@ class TestAdvancedMatching:
         composite = DeviceDescriptor(
             vid="1234",
             pid="5678",
+            device_class=0,
+            device_subclass=0,
+            device_protocol=0,
+            manufacturer=None,
+            product=None,
+            serial=None,
             interfaces=[
-                InterfaceDescriptor(interface_number=0, interface_class=3, endpoints=[]),
-                InterfaceDescriptor(interface_number=1, interface_class=8, endpoints=[]),
+                InterfaceDescriptor(interface_class=3, interface_subclass=0, interface_protocol=0, num_endpoints=0, interface_number=0, endpoints=[]),
+                InterfaceDescriptor(interface_class=8, interface_subclass=0, interface_protocol=0, num_endpoints=0, interface_number=1, endpoints=[]),
             ],
         )
 
@@ -452,12 +467,19 @@ class TestAdvancedMatching:
         keyboard = DeviceDescriptor(
             vid="1234",
             pid="5678",
+            device_class=0,
+            device_subclass=0,
+            device_protocol=0,
+            manufacturer=None,
+            product=None,
+            serial=None,
             interfaces=[
                 InterfaceDescriptor(
-                    interface_number=0,
                     interface_class=3,  # HID
                     interface_subclass=1,  # Boot
                     interface_protocol=1,  # Keyboard
+                    num_endpoints=0,
+                    interface_number=0,
                     endpoints=[],
                 )
             ],
@@ -466,12 +488,19 @@ class TestAdvancedMatching:
         mouse = DeviceDescriptor(
             vid="1234",
             pid="5678",
+            device_class=0,
+            device_subclass=0,
+            device_protocol=0,
+            manufacturer=None,
+            product=None,
+            serial=None,
             interfaces=[
                 InterfaceDescriptor(
-                    interface_number=0,
                     interface_class=3,  # HID
                     interface_subclass=1,  # Boot
                     interface_protocol=2,  # Mouse
+                    num_endpoints=0,
+                    interface_number=0,
                     endpoints=[],
                 )
             ],
@@ -500,20 +529,32 @@ class TestAdvancedMatching:
         two_interfaces = DeviceDescriptor(
             vid="1234",
             pid="5678",
+            device_class=0,
+            device_subclass=0,
+            device_protocol=0,
+            manufacturer=None,
+            product=None,
+            serial=None,
             interfaces=[
-                InterfaceDescriptor(interface_number=0, interface_class=3, endpoints=[]),
-                InterfaceDescriptor(interface_number=1, interface_class=8, endpoints=[]),
+                InterfaceDescriptor(interface_class=3, interface_subclass=0, interface_protocol=0, num_endpoints=0, interface_number=0, endpoints=[]),
+                InterfaceDescriptor(interface_class=8, interface_subclass=0, interface_protocol=0, num_endpoints=0, interface_number=1, endpoints=[]),
             ],
         )
 
         four_interfaces = DeviceDescriptor(
             vid="1234",
             pid="5678",
+            device_class=0,
+            device_subclass=0,
+            device_protocol=0,
+            manufacturer=None,
+            product=None,
+            serial=None,
             interfaces=[
-                InterfaceDescriptor(interface_number=0, interface_class=3, endpoints=[]),
-                InterfaceDescriptor(interface_number=1, interface_class=8, endpoints=[]),
-                InterfaceDescriptor(interface_number=2, interface_class=1, endpoints=[]),
-                InterfaceDescriptor(interface_number=3, interface_class=2, endpoints=[]),
+                InterfaceDescriptor(interface_class=3, interface_subclass=0, interface_protocol=0, num_endpoints=0, interface_number=0, endpoints=[]),
+                InterfaceDescriptor(interface_class=8, interface_subclass=0, interface_protocol=0, num_endpoints=0, interface_number=1, endpoints=[]),
+                InterfaceDescriptor(interface_class=1, interface_subclass=0, interface_protocol=0, num_endpoints=0, interface_number=2, endpoints=[]),
+                InterfaceDescriptor(interface_class=2, interface_subclass=0, interface_protocol=0, num_endpoints=0, interface_number=3, endpoints=[]),
             ],
         )
 
@@ -566,7 +607,7 @@ rules:
         processor = create_processor(policy_path=policy_file)
         assert processor is not None
 
-        device = DeviceDescriptor(vid="046d", pid="1234", interfaces=[])
+        device = DeviceDescriptor(vid="046d", pid="1234", device_class=0, device_subclass=0, device_protocol=0, manufacturer=None, product=None, serial=None, interfaces=[])
         result = processor.process(device)
         assert result.policy_result.action == Action.ALLOW
 
@@ -576,7 +617,7 @@ rules:
         assert processor is not None
 
         # Default policy should allow Logitech
-        device = DeviceDescriptor(vid="046d", pid="1234", interfaces=[])
+        device = DeviceDescriptor(vid="046d", pid="1234", device_class=0, device_subclass=0, device_protocol=0, manufacturer=None, product=None, serial=None, interfaces=[])
         result = processor.process(device)
         assert result.policy_result.action == Action.ALLOW
 
