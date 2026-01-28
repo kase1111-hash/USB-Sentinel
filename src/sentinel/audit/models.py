@@ -6,9 +6,14 @@ SQLAlchemy ORM models for device and event tracking.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
+
+
+def _utc_now() -> datetime:
+    """Get current UTC time (timezone-aware)."""
+    return datetime.now(timezone.utc)
 
 from sqlalchemy import (
     Boolean,
@@ -65,8 +70,8 @@ class Device(Base):
     manufacturer = Column(String(256), nullable=True)
     product = Column(String(256), nullable=True)
     serial = Column(String(256), nullable=True)
-    first_seen = Column(DateTime, default=datetime.utcnow, nullable=False)
-    last_seen = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    first_seen = Column(DateTime, default=_utc_now, nullable=False)
+    last_seen = Column(DateTime, default=_utc_now, onupdate=_utc_now)
     trust_level = Column(String(16), default=TrustLevel.UNKNOWN.value, nullable=False)
     notes = Column(Text, nullable=True)
 
@@ -101,7 +106,7 @@ class Event(Base):
     __tablename__ = "events"
 
     id = Column(Integer, primary_key=True)
-    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    timestamp = Column(DateTime, default=_utc_now, nullable=False, index=True)
     device_fingerprint = Column(
         String(64),
         ForeignKey("devices.fingerprint"),

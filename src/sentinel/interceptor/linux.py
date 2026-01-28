@@ -11,7 +11,7 @@ import asyncio
 import logging
 import os
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import AsyncIterator, Callable
@@ -43,7 +43,7 @@ class USBEvent:
     address: int
     device_path: str
     sys_path: str
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     descriptor: DeviceDescriptor | None = None
     vid: str | None = None
     pid: str | None = None

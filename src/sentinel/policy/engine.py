@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
@@ -73,14 +73,21 @@ class RuleMatcher:
     Handles all match condition types including regex patterns.
     """
 
-    def __init__(self, fingerprint_db: FingerprintDatabase | None = None) -> None:
+    def __init__(
+        self,
+        fingerprint_db: FingerprintDatabase | None = None,
+        trust_lookup: Callable[[str], str | None] | None = None,
+    ) -> None:
         """
         Initialize the matcher.
 
         Args:
             fingerprint_db: Optional fingerprint database for first-seen checks
+            trust_lookup: Optional callback to look up device trust level by fingerprint.
+                         Should return trust level string or None if not found.
         """
         self.fingerprint_db = fingerprint_db or FingerprintDatabase()
+        self.trust_lookup = trust_lookup
         self._regex_cache: dict[str, re.Pattern] = {}
 
     def matches(
@@ -199,12 +206,12 @@ class RuleMatcher:
 
         # Is keyboard
         if condition.is_keyboard is not None:
-            if condition.is_keyboard != device.is_keyboard:
+            if condition.is_keyboard != device.has_keyboard:
                 return False
 
         # Is mouse
         if condition.is_mouse is not None:
-            if condition.is_mouse != device.is_mouse:
+            if condition.is_mouse != device.has_mouse:
                 return False
 
         # Endpoint count > N
@@ -235,12 +242,13 @@ class RuleMatcher:
                 return False
 
         # Trust level check (requires external trust database)
-        # This is a placeholder - trust_level would be checked against
-        # a trust database that tracks device trust scores
         if condition.trust_level is not None:
-            # For now, all devices are "unknown" trust level
-            # A real implementation would look up device trust in a database
             device_trust = "unknown"
+            if self.trust_lookup is not None:
+                fingerprint = generate_fingerprint(device)
+                looked_up_trust = self.trust_lookup(fingerprint)
+                if looked_up_trust is not None:
+                    device_trust = looked_up_trust
             if condition.trust_level != device_trust:
                 return False
 
@@ -320,6 +328,7 @@ class PolicyEngine:
         policy: Policy | None = None,
         fingerprint_db: FingerprintDatabase | None = None,
         default_action: Action = Action.REVIEW,
+        trust_lookup: Callable[[str], str | None] | None = None,
     ) -> None:
         """
         Initialize the policy engine.
@@ -328,11 +337,14 @@ class PolicyEngine:
             policy: Policy to evaluate against
             fingerprint_db: Fingerprint database for first-seen checks
             default_action: Action when no rules match
+            trust_lookup: Optional callback to look up device trust level by fingerprint.
+                         Should return trust level string or None if not found.
         """
         self.policy = policy or Policy()
         self.fingerprint_db = fingerprint_db or FingerprintDatabase()
         self.default_action = default_action
-        self.matcher = RuleMatcher(self.fingerprint_db)
+        self.trust_lookup = trust_lookup
+        self.matcher = RuleMatcher(self.fingerprint_db, trust_lookup)
 
         # Statistics
         self._evaluations = 0
@@ -349,6 +361,7 @@ class PolicyEngine:
         cls,
         policy_path: str | Path,
         fingerprint_db: FingerprintDatabase | None = None,
+        trust_lookup: Callable[[str], str | None] | None = None,
     ) -> PolicyEngine:
         """
         Create engine from policy file.
@@ -356,6 +369,7 @@ class PolicyEngine:
         Args:
             policy_path: Path to policy YAML file
             fingerprint_db: Optional fingerprint database
+            trust_lookup: Optional callback to look up device trust level by fingerprint
 
         Returns:
             Configured PolicyEngine
@@ -364,7 +378,7 @@ class PolicyEngine:
         errors = validate_policy(policy)
         for error in errors:
             logger.warning("Policy validation: %s", error)
-        return cls(policy=policy, fingerprint_db=fingerprint_db)
+        return cls(policy=policy, fingerprint_db=fingerprint_db, trust_lookup=trust_lookup)
 
     def evaluate(self, device: DeviceDescriptor) -> EvaluationResult:
         """
@@ -376,7 +390,7 @@ class PolicyEngine:
         Returns:
             EvaluationResult with action and matched rule
         """
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
         fingerprint = generate_fingerprint(device)
 
         # Run pre-evaluate hooks
@@ -389,7 +403,7 @@ class PolicyEngine:
         # Evaluate rules in order
         for i, rule in enumerate(self.policy.rules):
             if self.matcher.matches(rule.match, device):
-                elapsed = (datetime.utcnow() - start_time).total_seconds() * 1000
+                elapsed = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
 
                 result = EvaluationResult(
                     action=rule.action,
@@ -410,7 +424,7 @@ class PolicyEngine:
                 return result
 
         # No rule matched - use default action
-        elapsed = (datetime.utcnow() - start_time).total_seconds() * 1000
+        elapsed = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
 
         result = EvaluationResult(
             action=self.default_action,

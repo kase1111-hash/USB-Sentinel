@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -204,7 +204,7 @@ class DeviceDescriptor:
     product: str | None
     serial: str | None
     interfaces: list[InterfaceDescriptor] = field(default_factory=list)
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     bus: int | None = None
     address: int | None = None
     speed: str | None = None  # "low", "full", "high", "super"
@@ -324,7 +324,7 @@ class DeviceDescriptor:
         if isinstance(timestamp, str):
             timestamp = datetime.fromisoformat(timestamp)
         elif timestamp is None:
-            timestamp = datetime.utcnow()
+            timestamp = datetime.now(timezone.utc)
 
         return cls(
             vid=data.get("vid", "0000"),

@@ -351,7 +351,7 @@ class LLMAnalyzer:
             AnalysisResult with risk assessment
         """
         # Run in thread pool to avoid blocking
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             None,
             lambda: self.analyze(device, history, similar_devices)
