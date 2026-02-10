@@ -6,7 +6,7 @@ Defines request/response models for API validation and serialization.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
@@ -292,7 +292,7 @@ class WebSocketMessage(BaseModel):
 
     type: str
     data: dict[str, Any]
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class DeviceEventMessage(BaseModel):
@@ -310,7 +310,7 @@ class AlertMessage(BaseModel):
     severity: str  # "info", "warning", "critical"
     message: str
     device_fingerprint: str | None = None
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 # =============================================================================

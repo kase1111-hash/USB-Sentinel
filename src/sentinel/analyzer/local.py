@@ -279,7 +279,7 @@ class LocalLLMAnalyzer:
         Note: Local LLM is CPU-bound, so this runs in executor.
         """
         import asyncio
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             None,
             lambda: self.analyze(device, history, similar_devices)

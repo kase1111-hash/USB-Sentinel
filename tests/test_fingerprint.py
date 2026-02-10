@@ -4,7 +4,7 @@ Tests for device fingerprinting and descriptor validation.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pytest
 
@@ -113,7 +113,7 @@ class TestDeviceFingerprint:
             vid="046d",
             pid="c534",
             components=["vid:046d", "pid:c534"],
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
         )
 
         assert fp == "abc123"
@@ -127,7 +127,7 @@ class TestDeviceFingerprint:
             vid="046d",
             pid="c534",
             components=["vid:046d", "pid:c534"],
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
         )
 
         d = fp.to_dict()
@@ -152,7 +152,7 @@ class TestFingerprintMatch:
             vid="046d",
             pid="c534",
             components=[],
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
         )
         fp2 = DeviceFingerprint(
             fingerprint="abc123",
@@ -160,7 +160,7 @@ class TestFingerprintMatch:
             vid="046d",
             pid="c534",
             components=[],
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
         )
 
         assert fingerprint_match(fp1, fp2) is True
@@ -178,7 +178,7 @@ class TestFingerprintDatabase:
             vid="046d",
             pid="c534",
             components=[],
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
         )
 
         db.add(fp, trust_level="trusted")
@@ -199,7 +199,7 @@ class TestFingerprintDatabase:
             vid="046d",
             pid="c534",
             components=[],
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
         )
         db.add(fp)
 
@@ -214,7 +214,7 @@ class TestFingerprintDatabase:
             vid="046d",
             pid="c534",
             components=[],
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
         )
 
         db.add(fp, trust_level="unknown")
@@ -232,7 +232,7 @@ class TestFingerprintDatabase:
             vid="046d",
             pid="c534",
             components=[],
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
         )
 
         db.add(fp)

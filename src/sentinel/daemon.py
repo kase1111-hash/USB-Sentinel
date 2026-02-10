@@ -16,7 +16,7 @@ import asyncio
 import logging
 import signal
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -127,7 +127,7 @@ class SentinelDaemon:
         """Start the daemon and all services."""
         logger.info("Starting USB Sentinel daemon v%s", __version__)
         self.running = True
-        self._stats["start_time"] = datetime.utcnow()
+        self._stats["start_time"] = datetime.now(timezone.utc)
         self._shutdown_event.clear()
 
         # Initialize database
@@ -448,7 +448,7 @@ class SentinelDaemon:
         """Get daemon statistics."""
         uptime = None
         if self._stats["start_time"]:
-            uptime = (datetime.utcnow() - self._stats["start_time"]).total_seconds()
+            uptime = (datetime.now(timezone.utc) - self._stats["start_time"]).total_seconds()
 
         return {
             **self._stats,

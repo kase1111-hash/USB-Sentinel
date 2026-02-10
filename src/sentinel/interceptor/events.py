@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Callable, Coroutine
 
@@ -72,7 +72,7 @@ class EventQueue:
 
         prioritized = PrioritizedEvent(
             priority=priority.value,
-            timestamp=datetime.utcnow().timestamp(),
+            timestamp=datetime.now(timezone.utc).timestamp(),
             event=event,
         )
         await self._queue.put(prioritized)
@@ -195,7 +195,7 @@ class ProcessedEvent:
     """
 
     event: Any
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     descriptor: DeviceDescriptor | None = None
     policy_action: str | None = None
     policy_rule: str | None = None
@@ -280,7 +280,7 @@ class EventProcessor:
             ProcessedEvent with results
         """
         async with self._semaphore:
-            start_time = datetime.utcnow()
+            start_time = datetime.now(timezone.utc)
             result = ProcessedEvent(event=event)
 
             try:
@@ -288,7 +288,7 @@ class EventProcessor:
                 await self.dispatcher.dispatch("usb_event", event)
 
                 # Calculate processing time
-                elapsed = datetime.utcnow() - start_time
+                elapsed = datetime.now(timezone.utc) - start_time
                 result.processing_time_ms = elapsed.total_seconds() * 1000
 
             except Exception as e:
