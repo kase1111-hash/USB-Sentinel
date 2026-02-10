@@ -63,19 +63,6 @@ interceptor:
   # Allowed USB classes that bypass review (use with caution)
   bypass_classes: []
 
-# Virtual USB Proxy settings (sandbox)
-proxy:
-  # Enable USB/IP proxy for sandboxed inspection
-  enabled: false
-  # Proxy host (isolated VM/container)
-  host: localhost
-  # Proxy port
-  port: 3240
-  # Enable traffic capture
-  capture_traffic: true
-  # Capture file directory
-  capture_dir: /var/lib/usb-sentinel/captures
-
 # API server settings
 api:
   # Enable REST API
