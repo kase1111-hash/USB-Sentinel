@@ -26,8 +26,12 @@ from sentinel.analyzer.scoring import AnalysisResult, score_to_action
 from sentinel.audit.database import AuditDatabase
 from sentinel.config import SentinelConfig, load_config, validate_config
 from sentinel.interceptor.descriptors import DeviceDescriptor
-from sentinel.interceptor.events import DeviceEvent, EventType, MockUSBInterceptor
-from sentinel.interceptor.linux import create_interceptor
+from sentinel.interceptor.linux import (
+    EventType,
+    USBEvent,
+    USBInterceptor,
+    get_platform_interceptor,
+)
 from sentinel.policy.engine import PolicyEngine
 from sentinel.policy.fingerprint import generate_fingerprint
 from sentinel.policy.models import Action
@@ -57,7 +61,7 @@ class SentinelDaemon:
         self._db: AuditDatabase | None = None
         self._policy_engine: PolicyEngine | None = None
         self._analyzer: LLMAnalyzer | None = None
-        self._interceptor: MockUSBInterceptor | None = None
+        self._interceptor: USBInterceptor | None = None
         self._api_server: Any = None
         self._api_enabled: bool = config.api.enabled
 
@@ -117,10 +121,10 @@ class SentinelDaemon:
         return self._analyzer
 
     @property
-    def interceptor(self) -> MockUSBInterceptor:
+    def interceptor(self) -> USBInterceptor:
         """Get or initialize USB interceptor."""
         if self._interceptor is None:
-            self._interceptor = create_interceptor(use_mock=True)
+            self._interceptor = get_platform_interceptor()
         return self._interceptor
 
     async def start(self) -> None:
@@ -172,7 +176,7 @@ class SentinelDaemon:
 
         # Clean up interceptor
         if self._interceptor is not None:
-            self._interceptor.cleanup()
+            self._interceptor.stop()
 
         # Close database
         if self._db is not None:
@@ -198,7 +202,7 @@ class SentinelDaemon:
         finally:
             await self.stop()
 
-    async def handle_device_event(self, event: DeviceEvent) -> dict[str, Any]:
+    async def handle_device_event(self, event: USBEvent) -> dict[str, Any]:
         """
         Process a device event through all layers.
 
@@ -231,7 +235,7 @@ class SentinelDaemon:
 
             # Register device if new
             if is_new:
-                self.db.register_device(
+                self.db.add_device(
                     fingerprint=fingerprint,
                     vid=descriptor.vid,
                     pid=descriptor.pid,
@@ -300,7 +304,7 @@ class SentinelDaemon:
             logger.error(f"Error processing device event: {e}", exc_info=True)
             raise
 
-    async def _execute_verdict(self, event: DeviceEvent, action: Action) -> None:
+    async def _execute_verdict(self, event: USBEvent, action: Action) -> None:
         """
         Execute the verdict on the device.
 
@@ -309,27 +313,25 @@ class SentinelDaemon:
             action: Action to take
         """
         if action == Action.ALLOW:
-            # Authorize device in kernel
-            self.interceptor.authorize_device(event.bus_id, True)
-            logger.info(f"Device authorized: {event.bus_id}")
+            self.interceptor.allow_device(event)
+            logger.info(f"Device authorized: {event.device_id}")
 
         elif action == Action.BLOCK:
-            # Reject device
-            self.interceptor.authorize_device(event.bus_id, False)
-            logger.warning(f"Device blocked: {event.bus_id}")
+            self.interceptor.block_device(event)
+            logger.warning(f"Device blocked: {event.device_id}")
 
             # Send alert if configured
             if self.config.alerts.enabled:
                 await self._send_alert(event, action)
 
         else:  # REVIEW/SANDBOX
-            # Allow device but monitor (in real implementation, would sandbox)
-            self.interceptor.authorize_device(event.bus_id, True)
-            logger.info(f"Device sandboxed: {event.bus_id}")
+            # Allow device but monitor
+            self.interceptor.allow_device(event)
+            logger.info(f"Device sandboxed: {event.device_id}")
 
     async def _broadcast_event(
         self,
-        event: DeviceEvent,
+        event: USBEvent,
         action: Action,
         result: dict[str, Any],
     ) -> None:
@@ -381,19 +383,10 @@ class SentinelDaemon:
 
     async def _event_loop(self):
         """Async generator for device events."""
-        while self.running:
-            # Check for events from interceptor
-            events = self.interceptor.poll_events(timeout=0.1)
-
-            for event in events:
-                yield event
-
-            # Check for shutdown
-            if self._shutdown_event.is_set():
+        async for event in self.interceptor.events():
+            if not self.running or self._shutdown_event.is_set():
                 break
-
-            # Small sleep to prevent busy-waiting
-            await asyncio.sleep(0.01)
+            yield event
 
     async def _start_api_server(self) -> None:
         """Start the FastAPI server (requires api dependencies)."""
