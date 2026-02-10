@@ -184,7 +184,7 @@ class APIKeyManager:
             return None
 
         if api_key.is_expired():
-            logger.warning(f"Expired API key used: {api_key.name}")
+            logger.warning("Expired API key used: %s", api_key.name)
             return None
 
         return api_key
@@ -470,4 +470,4 @@ def init_auth(default_key: str | None = None) -> None:
         # Generate a random key for development if none provided
         key, _ = generate_api_key()
         key_manager.set_default_key(key)
-        logger.warning(f"Generated development API key: {key}")
+        logger.warning("Generated development API key: %s", key)

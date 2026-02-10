@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from sentinel import __version__
-from sentinel.analyzer.llm import LLMAnalyzer
+from sentinel.analyzer.llm import LLMAnalyzer, MockLLMAnalyzer
 from sentinel.analyzer.scoring import AnalysisResult, score_to_action
 from sentinel.audit.database import AuditDatabase
 from sentinel.config import SentinelConfig, load_config, validate_config
@@ -87,37 +87,81 @@ class SentinelDaemon:
 
     @property
     def db(self) -> AuditDatabase:
-        """Get or initialize audit database."""
+        """Get or initialize audit database.
+
+        Creates parent directories automatically and retries once on
+        failure (e.g. locked database) before raising.
+        """
         if self._db is None:
             db_path = Path(self.config.database.path)
             db_path.parent.mkdir(parents=True, exist_ok=True)
-            self._db = AuditDatabase(str(db_path))
+            try:
+                self._db = AuditDatabase(str(db_path))
+            except Exception as e:
+                logger.warning("Database init failed (%s), retrying...", e)
+                import time
+                time.sleep(0.5)
+                self._db = AuditDatabase(str(db_path))
         return self._db
 
     @property
     def policy_engine(self) -> PolicyEngine:
-        """Get or initialize policy engine."""
+        """Get or initialize policy engine.
+
+        If the policy file is malformed, falls back to the default
+        built-in policy so the daemon can still protect the host.
+        """
         if self._policy_engine is None:
             policy_path = Path(self.config.policy.rules_file)
             if policy_path.exists():
-                policy = load_policy(policy_path)
-                self._policy_engine = PolicyEngine(policy=policy)
+                try:
+                    policy = load_policy(policy_path)
+                    self._policy_engine = PolicyEngine(policy=policy)
+                except Exception as e:
+                    logger.error(
+                        "Failed to load policy %s: %s — using built-in default policy",
+                        policy_path, e,
+                    )
+                    from sentinel.policy.engine import create_default_policy
+                    self._policy_engine = PolicyEngine(
+                        policy=create_default_policy()
+                    )
             else:
-                logger.warning(f"Policy file not found: {policy_path}, using empty policy")
-                self._policy_engine = PolicyEngine([])
+                logger.warning(
+                    "Policy file not found: %s — using built-in default policy",
+                    policy_path,
+                )
+                from sentinel.policy.engine import create_default_policy
+                self._policy_engine = PolicyEngine(
+                    policy=create_default_policy()
+                )
         return self._policy_engine
 
     @property
-    def analyzer(self) -> LLMAnalyzer | None:
-        """Get or initialize LLM analyzer."""
+    def analyzer(self) -> LLMAnalyzer | MockLLMAnalyzer | None:
+        """Get or initialize LLM analyzer.
+
+        Falls back to MockLLMAnalyzer (heuristic-based) when the Claude API
+        key is missing or the LLM fails to initialize.
+        """
         if self._analyzer is None and self.config.analyzer.enabled:
             if self.config.analyzer.api_key:
-                self._analyzer = LLMAnalyzer(
-                    api_key=self.config.analyzer.api_key,
-                    model=self.config.analyzer.model,
-                )
+                try:
+                    self._analyzer = LLMAnalyzer(
+                        api_key=self.config.analyzer.api_key,
+                        model=self.config.analyzer.model,
+                    )
+                except Exception:
+                    logger.warning(
+                        "LLM analyzer failed to initialize, "
+                        "falling back to local heuristic analyzer"
+                    )
+                    self._analyzer = MockLLMAnalyzer()
             else:
-                logger.warning("LLM analyzer disabled: no API key configured")
+                logger.warning(
+                    "No API key configured, using local heuristic analyzer"
+                )
+                self._analyzer = MockLLMAnalyzer()
         return self._analyzer
 
     @property
@@ -135,19 +179,19 @@ class SentinelDaemon:
         self._shutdown_event.clear()
 
         # Initialize database
-        logger.info(f"Initializing database: {self.config.database.path}")
+        logger.info("Initializing database: %s", self.config.database.path)
         _ = self.db
 
         # Initialize policy engine
-        logger.info(f"Loading policy from: {self.config.policy.rules_file}")
+        logger.info("Loading policy from: %s", self.config.policy.rules_file)
         _ = self.policy_engine
-        logger.info(f"Loaded {len(self.policy_engine.policy.rules)} policy rules")
+        logger.info("Loaded %d policy rules", len(self.policy_engine.policy.rules))
 
         # Initialize analyzer if enabled
         if self.config.analyzer.enabled:
             _ = self.analyzer
             if self.analyzer:
-                logger.info(f"LLM analyzer ready: {self.config.analyzer.model}")
+                logger.info("LLM analyzer ready: %s", self.config.analyzer.model)
             else:
                 logger.warning("LLM analyzer not available")
 
@@ -198,7 +242,7 @@ class SentinelDaemon:
         except asyncio.CancelledError:
             logger.info("Daemon loop cancelled")
         except Exception as e:
-            logger.error(f"Daemon error: {e}", exc_info=True)
+            logger.error("Daemon error: %s", e, exc_info=True)
         finally:
             await self.stop()
 
@@ -226,8 +270,9 @@ class SentinelDaemon:
             result["fingerprint"] = fingerprint
 
             logger.info(
-                f"Processing device: {descriptor.vid}:{descriptor.pid} "
-                f"({descriptor.product or 'Unknown'})"
+                "Processing device: %s:%s (%s)",
+                descriptor.vid, descriptor.pid,
+                descriptor.product or "Unknown",
             )
 
             # Check if device is known
@@ -243,7 +288,7 @@ class SentinelDaemon:
                     product=descriptor.product,
                     serial=descriptor.serial,
                 )
-                logger.info(f"New device registered: {fingerprint}")
+                logger.info("New device registered: %s", fingerprint)
 
             # Layer 2: Policy evaluation
             eval_result = self.policy_engine.evaluate(descriptor)
@@ -252,7 +297,7 @@ class SentinelDaemon:
             result["action"] = action.value
             result["rule"] = rule.comment if rule else None
 
-            logger.debug(f"Policy verdict: {action.value} (rule: {result['rule']})")
+            logger.debug("Policy verdict: %s (rule: %s)", action.value, result["rule"])
 
             # Layer 3: LLM analysis if needed
             analysis_result: AnalysisResult | None = None
@@ -265,26 +310,37 @@ class SentinelDaemon:
                     action = score_to_action(analysis_result.risk_score)
                     result["action"] = action.value
                     logger.info(
-                        f"LLM verdict: {action.value} "
-                        f"(risk_score: {analysis_result.risk_score})"
+                        "LLM verdict: %s (risk_score: %s)",
+                        action.value, analysis_result.risk_score,
                     )
                 except Exception as e:
-                    logger.error(f"LLM analysis failed: {e}")
-                    # Fall back to default action on error
-                    action = Action.REVIEW
+                    logger.warning("LLM analysis failed: %s, trying local fallback", e)
+                    try:
+                        fallback = MockLLMAnalyzer()
+                        analysis_result = fallback.analyze(descriptor)
+                        result["analysis"] = analysis_result.analysis
+                        result["risk_score"] = analysis_result.risk_score
+                        action = score_to_action(analysis_result.risk_score)
+                        result["action"] = action.value
+                    except Exception:
+                        logger.error("Local fallback also failed, keeping REVIEW")
+                        action = Action.REVIEW
 
             # Execute verdict
             await self._execute_verdict(event, action)
 
-            # Log event to database
-            self.db.log_event(
-                device_fingerprint=fingerprint,
-                event_type=event.event_type.value,
-                policy_rule=result["rule"],
-                llm_analysis=result["analysis"],
-                risk_score=result["risk_score"],
-                verdict=action.value,
-            )
+            # Log event to database (non-fatal if DB is temporarily locked)
+            try:
+                self.db.log_event(
+                    device_fingerprint=fingerprint,
+                    event_type=event.event_type.value,
+                    policy_rule=result["rule"],
+                    llm_analysis=result["analysis"],
+                    risk_score=result["risk_score"],
+                    verdict=action.value,
+                )
+            except Exception as db_err:
+                logger.warning("Failed to log event to database: %s", db_err)
 
             # Update statistics
             self._stats["devices_processed"] += 1
@@ -301,7 +357,7 @@ class SentinelDaemon:
             return result
 
         except Exception as e:
-            logger.error(f"Error processing device event: {e}", exc_info=True)
+            logger.error("Error processing device event: %s", e, exc_info=True)
             raise
 
     async def _execute_verdict(self, event: USBEvent, action: Action) -> None:
@@ -314,11 +370,11 @@ class SentinelDaemon:
         """
         if action == Action.ALLOW:
             self.interceptor.allow_device(event)
-            logger.info(f"Device authorized: {event.device_id}")
+            logger.info("Device authorized: %s", event.device_id)
 
         elif action == Action.BLOCK:
             self.interceptor.block_device(event)
-            logger.warning(f"Device blocked: {event.device_id}")
+            logger.warning("Device blocked: %s", event.device_id)
 
             # Send alert if configured
             if self.config.alerts.enabled:
@@ -327,7 +383,7 @@ class SentinelDaemon:
         else:  # REVIEW/SANDBOX
             # Allow device but monitor
             self.interceptor.allow_device(event)
-            logger.info(f"Device sandboxed: {event.device_id}")
+            logger.info("Device sandboxed: %s", event.device_id)
 
     async def _broadcast_event(
         self,
@@ -362,24 +418,23 @@ class SentinelDaemon:
                 verdict=action.value,
             )
         except Exception as e:
-            logger.debug(f"WebSocket broadcast failed: {e}")
+            logger.debug("WebSocket broadcast failed: %s", e)
 
-    async def _send_alert(self, event: DeviceEvent, action: Action) -> None:
+    async def _send_alert(self, event: USBEvent, action: Action) -> None:
         """Send alert notification for blocked device."""
         descriptor = event.descriptor
-        message = (
-            f"USB Device Blocked: {descriptor.vid}:{descriptor.pid} "
-            f"({descriptor.product or 'Unknown'})"
+        message = "USB Device Blocked: %s:%s (%s)" % (
+            descriptor.vid, descriptor.pid,
+            descriptor.product or "Unknown",
         )
 
         # Log to syslog if enabled
         if self.config.alerts.methods.syslog:
-            logger.warning(f"ALERT: {message}")
+            logger.warning("ALERT: %s", message)
 
         # Send webhook if configured
         if self.config.alerts.methods.webhook:
-            # In a real implementation, would POST to webhook URL
-            logger.debug(f"Would send webhook alert: {message}")
+            logger.debug("Would send webhook alert: %s", message)
 
     async def _event_loop(self):
         """Async generator for device events."""
@@ -395,7 +450,7 @@ class SentinelDaemon:
         from sentinel.api import configure_services, create_app
         from sentinel.api.websocket import init_websocket
 
-        logger.info(f"Starting API server on {self.config.api.host}:{self.config.api.port}")
+        logger.info("Starting API server on %s:%s", self.config.api.host, self.config.api.port)
 
         # Create and configure app
         app = create_app(
