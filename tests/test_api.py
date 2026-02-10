@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -84,8 +84,8 @@ def mock_db():
     mock_device.manufacturer = "Logitech"
     mock_device.product = "Unifying Receiver"
     mock_device.serial = "12345"
-    mock_device.first_seen = datetime.utcnow()
-    mock_device.last_seen = datetime.utcnow()
+    mock_device.first_seen = datetime.now(timezone.utc)
+    mock_device.last_seen = datetime.now(timezone.utc)
     mock_device.trust_level = "trusted"
     mock_device.notes = None
     mock_device.to_dict.return_value = {
@@ -96,8 +96,8 @@ def mock_db():
         "manufacturer": "Logitech",
         "product": "Unifying Receiver",
         "trust_level": "trusted",
-        "first_seen": datetime.utcnow().isoformat(),
-        "last_seen": datetime.utcnow().isoformat(),
+        "first_seen": datetime.now(timezone.utc).isoformat(),
+        "last_seen": datetime.now(timezone.utc).isoformat(),
     }
 
     db.get_device.return_value = mock_device
@@ -113,7 +113,7 @@ def mock_db():
     # Mock event data
     mock_event = MagicMock()
     mock_event.id = 1
-    mock_event.timestamp = datetime.utcnow()
+    mock_event.timestamp = datetime.now(timezone.utc)
     mock_event.device_fingerprint = "abc123def456abcd"
     mock_event.event_type = "connect"
     mock_event.policy_rule = None
@@ -122,7 +122,7 @@ def mock_db():
     mock_event.verdict = "allowed"
     mock_event.to_dict.return_value = {
         "id": 1,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "device_fingerprint": "abc123def456abcd",
         "event_type": "connect",
         "verdict": "allowed",
@@ -170,7 +170,7 @@ def mock_policy_engine():
             ),
         ]
     )
-    engine.last_modified = datetime.utcnow()
+    engine.last_modified = datetime.now(timezone.utc)
     engine.update_rules = MagicMock()
 
     return engine
@@ -240,7 +240,7 @@ class TestAPIKeyManager:
         manager.add_key(
             key,
             "expired_test",
-            expires_at=datetime.utcnow() - timedelta(hours=1),
+            expires_at=datetime.now(timezone.utc) - timedelta(hours=1),
         )
 
         result = manager.validate_key(key)
@@ -361,8 +361,8 @@ class TestDeviceSchemas:
             product="Mouse",
             serial=None,
             trust_level=TrustLevel.TRUSTED,
-            first_seen=datetime.utcnow(),
-            last_seen=datetime.utcnow(),
+            first_seen=datetime.now(timezone.utc),
+            last_seen=datetime.now(timezone.utc),
         )
         assert device.vid == "046d"
         assert device.trust_level == TrustLevel.TRUSTED
@@ -376,7 +376,7 @@ class TestDeviceSchemas:
                 vid="invalid",  # Not 4 hex chars
                 pid="c534",
                 trust_level=TrustLevel.UNKNOWN,
-                first_seen=datetime.utcnow(),
+                first_seen=datetime.now(timezone.utc),
             )
 
     def test_device_update_sanitizes_notes(self):
@@ -395,7 +395,7 @@ class TestEventSchemas:
         """Test valid event response."""
         event = EventResponse(
             id=1,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             device_fingerprint="abc123",
             event_type=EventType.CONNECT,
             risk_score=25,
@@ -409,7 +409,7 @@ class TestEventSchemas:
         with pytest.raises(ValueError):
             EventResponse(
                 id=1,
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(timezone.utc),
                 device_fingerprint="abc",
                 event_type=EventType.CONNECT,
                 risk_score=150,  # > 100
@@ -675,7 +675,7 @@ class TestWebSocketMessage:
                 "id": "123",
                 "event": "device.connect",
                 "data": {"fingerprint": "abc"},
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
         )
         message = WebSocketMessage.from_json(json_str)

@@ -10,7 +10,7 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Callable
 from weakref import WeakSet
@@ -66,8 +66,8 @@ class WebSocketMessage:
 
     event_type: WebSocketEventType | str
     data: dict[str, Any]
-    timestamp: datetime = field(default_factory=datetime.utcnow)
-    id: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    id: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     def to_json(self) -> str:
         """Serialize to JSON string."""
@@ -91,7 +91,7 @@ class WebSocketMessage:
         return cls(
             event_type=parsed.get("event", "unknown"),
             data=parsed.get("data", {}),
-            timestamp=datetime.fromisoformat(parsed.get("timestamp", datetime.utcnow().isoformat())),
+            timestamp=datetime.fromisoformat(parsed.get("timestamp", datetime.now(timezone.utc).isoformat())),
             id=parsed.get("id", ""),
         )
 
@@ -118,7 +118,7 @@ class WebSocketConnection:
     client_id: str
     subscriptions: set[str] = field(default_factory=set)
     authenticated: bool = False
-    connected_at: datetime = field(default_factory=datetime.utcnow)
+    connected_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     async def send(self, message: WebSocketMessage) -> bool:
         """
@@ -428,7 +428,7 @@ class ConnectionManager:
                 message = WebSocketMessage(
                     event_type=WebSocketEventType.HEARTBEAT,
                     data={
-                        "timestamp": datetime.utcnow().isoformat(),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
                         "connections": self.connection_count,
                     },
                 )
@@ -542,7 +542,7 @@ async def broadcast_policy_update() -> None:
     """Broadcast policy update notification."""
     message = WebSocketMessage(
         event_type=WebSocketEventType.POLICY_UPDATED,
-        data={"updated_at": datetime.utcnow().isoformat()},
+        data={"updated_at": datetime.now(timezone.utc).isoformat()},
     )
     await manager.broadcast(message)
 
@@ -567,7 +567,7 @@ async def websocket_endpoint(
     """
     # Generate client ID if not provided
     if not client_id:
-        client_id = f"client_{datetime.utcnow().timestamp()}"
+        client_id = f"client_{datetime.now(timezone.utc).timestamp()}"
 
     conn = await manager.connect(websocket, client_id, api_key)
 

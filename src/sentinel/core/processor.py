@@ -59,7 +59,7 @@ class ProcessingResult:
     risk_score: int  # 0-100 combined score
 
     # Metadata
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     processing_time_ms: float = 0.0
     llm_analysis: str | None = None
 

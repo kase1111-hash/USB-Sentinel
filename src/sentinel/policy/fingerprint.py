@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -103,7 +103,7 @@ class FingerprintGenerator:
             vid=descriptor.vid,
             pid=descriptor.pid,
             components=components,
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
         )
 
     def _get_components(self, descriptor: DeviceDescriptor) -> list[str]:
@@ -211,7 +211,7 @@ class FingerprintDatabase:
             trust_level: Initial trust level
         """
         fp_str = fingerprint.fingerprint
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         if fp_str not in self._fingerprints:
             self._first_seen[fp_str] = now
@@ -260,7 +260,7 @@ class FingerprintDatabase:
     def update_last_seen(self, fingerprint: str) -> None:
         """Update last seen timestamp."""
         if fingerprint in self._fingerprints:
-            self._last_seen[fingerprint] = datetime.utcnow()
+            self._last_seen[fingerprint] = datetime.now(timezone.utc)
 
     def all_fingerprints(self) -> list[str]:
         """Get all fingerprints in database."""

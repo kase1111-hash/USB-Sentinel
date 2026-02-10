@@ -6,7 +6,7 @@ Main entry point that integrates all system layers:
 - Policy Engine (Layer 2)
 - LLM Analyzer (Layer 3)
 - Audit Database (Layer 4)
-- REST API (Layer 5)
+- REST API (Layer 5, optional)
 """
 
 from __future__ import annotations
@@ -16,27 +16,22 @@ import asyncio
 import logging
 import signal
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-
-import uvicorn
 
 from sentinel import __version__
 from sentinel.analyzer.llm import LLMAnalyzer
 from sentinel.analyzer.scoring import AnalysisResult, score_to_action
-from sentinel.api import configure_services, create_app
-from sentinel.api.websocket import (
-    WebSocketEventType,
-    broadcast_device_event,
-    init_websocket,
-    shutdown_websocket,
-)
 from sentinel.audit.database import AuditDatabase
 from sentinel.config import SentinelConfig, load_config, validate_config
 from sentinel.interceptor.descriptors import DeviceDescriptor
-from sentinel.interceptor.events import DeviceEvent, EventType, MockUSBInterceptor
-from sentinel.interceptor.linux import create_interceptor
+from sentinel.interceptor.linux import (
+    EventType,
+    USBEvent,
+    USBInterceptor,
+    get_platform_interceptor,
+)
 from sentinel.policy.engine import PolicyEngine
 from sentinel.policy.fingerprint import generate_fingerprint
 from sentinel.policy.models import Action
@@ -66,8 +61,9 @@ class SentinelDaemon:
         self._db: AuditDatabase | None = None
         self._policy_engine: PolicyEngine | None = None
         self._analyzer: LLMAnalyzer | None = None
-        self._interceptor: MockUSBInterceptor | None = None
-        self._api_server: uvicorn.Server | None = None
+        self._interceptor: USBInterceptor | None = None
+        self._api_server: Any = None
+        self._api_enabled: bool = config.api.enabled
 
         # State
         self.running = False
@@ -125,17 +121,17 @@ class SentinelDaemon:
         return self._analyzer
 
     @property
-    def interceptor(self) -> MockUSBInterceptor:
+    def interceptor(self) -> USBInterceptor:
         """Get or initialize USB interceptor."""
         if self._interceptor is None:
-            self._interceptor = create_interceptor(use_mock=True)
+            self._interceptor = get_platform_interceptor()
         return self._interceptor
 
     async def start(self) -> None:
         """Start the daemon and all services."""
         logger.info("Starting USB Sentinel daemon v%s", __version__)
         self.running = True
-        self._stats["start_time"] = datetime.utcnow()
+        self._stats["start_time"] = datetime.now(timezone.utc)
         self._shutdown_event.clear()
 
         # Initialize database
@@ -175,11 +171,12 @@ class SentinelDaemon:
         # Stop API server
         if self._api_server is not None:
             self._api_server.should_exit = True
+            from sentinel.api.websocket import shutdown_websocket
             await shutdown_websocket()
 
         # Clean up interceptor
         if self._interceptor is not None:
-            self._interceptor.cleanup()
+            self._interceptor.stop()
 
         # Close database
         if self._db is not None:
@@ -205,7 +202,7 @@ class SentinelDaemon:
         finally:
             await self.stop()
 
-    async def handle_device_event(self, event: DeviceEvent) -> dict[str, Any]:
+    async def handle_device_event(self, event: USBEvent) -> dict[str, Any]:
         """
         Process a device event through all layers.
 
@@ -238,7 +235,7 @@ class SentinelDaemon:
 
             # Register device if new
             if is_new:
-                self.db.register_device(
+                self.db.add_device(
                     fingerprint=fingerprint,
                     vid=descriptor.vid,
                     pid=descriptor.pid,
@@ -307,7 +304,7 @@ class SentinelDaemon:
             logger.error(f"Error processing device event: {e}", exc_info=True)
             raise
 
-    async def _execute_verdict(self, event: DeviceEvent, action: Action) -> None:
+    async def _execute_verdict(self, event: USBEvent, action: Action) -> None:
         """
         Execute the verdict on the device.
 
@@ -316,32 +313,38 @@ class SentinelDaemon:
             action: Action to take
         """
         if action == Action.ALLOW:
-            # Authorize device in kernel
-            self.interceptor.authorize_device(event.bus_id, True)
-            logger.info(f"Device authorized: {event.bus_id}")
+            self.interceptor.allow_device(event)
+            logger.info(f"Device authorized: {event.device_id}")
 
         elif action == Action.BLOCK:
-            # Reject device
-            self.interceptor.authorize_device(event.bus_id, False)
-            logger.warning(f"Device blocked: {event.bus_id}")
+            self.interceptor.block_device(event)
+            logger.warning(f"Device blocked: {event.device_id}")
 
             # Send alert if configured
             if self.config.alerts.enabled:
                 await self._send_alert(event, action)
 
         else:  # REVIEW/SANDBOX
-            # Allow device but monitor (in real implementation, would sandbox)
-            self.interceptor.authorize_device(event.bus_id, True)
-            logger.info(f"Device sandboxed: {event.bus_id}")
+            # Allow device but monitor
+            self.interceptor.allow_device(event)
+            logger.info(f"Device sandboxed: {event.device_id}")
 
     async def _broadcast_event(
         self,
-        event: DeviceEvent,
+        event: USBEvent,
         action: Action,
         result: dict[str, Any],
     ) -> None:
-        """Broadcast device event via WebSocket."""
+        """Broadcast device event via WebSocket (only when API is enabled)."""
+        if not self._api_enabled:
+            return
+
         try:
+            from sentinel.api.websocket import (
+                WebSocketEventType,
+                broadcast_device_event,
+            )
+
             event_type_map = {
                 Action.ALLOW: WebSocketEventType.DEVICE_ALLOWED,
                 Action.BLOCK: WebSocketEventType.DEVICE_BLOCKED,
@@ -380,22 +383,18 @@ class SentinelDaemon:
 
     async def _event_loop(self):
         """Async generator for device events."""
-        while self.running:
-            # Check for events from interceptor
-            events = self.interceptor.poll_events(timeout=0.1)
-
-            for event in events:
-                yield event
-
-            # Check for shutdown
-            if self._shutdown_event.is_set():
+        async for event in self.interceptor.events():
+            if not self.running or self._shutdown_event.is_set():
                 break
-
-            # Small sleep to prevent busy-waiting
-            await asyncio.sleep(0.01)
+            yield event
 
     async def _start_api_server(self) -> None:
-        """Start the FastAPI server."""
+        """Start the FastAPI server (requires api dependencies)."""
+        import uvicorn
+
+        from sentinel.api import configure_services, create_app
+        from sentinel.api.websocket import init_websocket
+
         logger.info(f"Starting API server on {self.config.api.host}:{self.config.api.port}")
 
         # Create and configure app
@@ -442,7 +441,7 @@ class SentinelDaemon:
         """Get daemon statistics."""
         uptime = None
         if self._stats["start_time"]:
-            uptime = (datetime.utcnow() - self._stats["start_time"]).total_seconds()
+            uptime = (datetime.now(timezone.utc) - self._stats["start_time"]).total_seconds()
 
         return {
             **self._stats,
