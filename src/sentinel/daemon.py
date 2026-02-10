@@ -6,7 +6,7 @@ Main entry point that integrates all system layers:
 - Policy Engine (Layer 2)
 - LLM Analyzer (Layer 3)
 - Audit Database (Layer 4)
-- REST API (Layer 5)
+- REST API (Layer 5, optional)
 """
 
 from __future__ import annotations
@@ -20,18 +20,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import uvicorn
-
 from sentinel import __version__
 from sentinel.analyzer.llm import LLMAnalyzer
 from sentinel.analyzer.scoring import AnalysisResult, score_to_action
-from sentinel.api import configure_services, create_app
-from sentinel.api.websocket import (
-    WebSocketEventType,
-    broadcast_device_event,
-    init_websocket,
-    shutdown_websocket,
-)
 from sentinel.audit.database import AuditDatabase
 from sentinel.config import SentinelConfig, load_config, validate_config
 from sentinel.interceptor.descriptors import DeviceDescriptor
@@ -67,7 +58,8 @@ class SentinelDaemon:
         self._policy_engine: PolicyEngine | None = None
         self._analyzer: LLMAnalyzer | None = None
         self._interceptor: MockUSBInterceptor | None = None
-        self._api_server: uvicorn.Server | None = None
+        self._api_server: Any = None
+        self._api_enabled: bool = config.api.enabled
 
         # State
         self.running = False
@@ -175,6 +167,7 @@ class SentinelDaemon:
         # Stop API server
         if self._api_server is not None:
             self._api_server.should_exit = True
+            from sentinel.api.websocket import shutdown_websocket
             await shutdown_websocket()
 
         # Clean up interceptor
@@ -340,8 +333,16 @@ class SentinelDaemon:
         action: Action,
         result: dict[str, Any],
     ) -> None:
-        """Broadcast device event via WebSocket."""
+        """Broadcast device event via WebSocket (only when API is enabled)."""
+        if not self._api_enabled:
+            return
+
         try:
+            from sentinel.api.websocket import (
+                WebSocketEventType,
+                broadcast_device_event,
+            )
+
             event_type_map = {
                 Action.ALLOW: WebSocketEventType.DEVICE_ALLOWED,
                 Action.BLOCK: WebSocketEventType.DEVICE_BLOCKED,
@@ -395,7 +396,12 @@ class SentinelDaemon:
             await asyncio.sleep(0.01)
 
     async def _start_api_server(self) -> None:
-        """Start the FastAPI server."""
+        """Start the FastAPI server (requires api dependencies)."""
+        import uvicorn
+
+        from sentinel.api import configure_services, create_app
+        from sentinel.api.websocket import init_websocket
+
         logger.info(f"Starting API server on {self.config.api.host}:{self.config.api.port}")
 
         # Create and configure app

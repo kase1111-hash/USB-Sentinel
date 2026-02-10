@@ -63,10 +63,10 @@ interceptor:
   # Allowed USB classes that bypass review (use with caution)
   bypass_classes: []
 
-# API server settings
+# API server settings (optional — enable for dashboard/remote management)
 api:
   # Enable REST API
-  enabled: true
+  enabled: false
   # Listen host
   host: 127.0.0.1
   # Listen port

@@ -90,21 +90,10 @@ class InterceptorConfig:
 
 
 @dataclass
-class ProxyConfig:
-    """Virtual USB Proxy settings."""
-
-    enabled: bool = False
-    host: str = "localhost"
-    port: int = 3240
-    capture_traffic: bool = True
-    capture_dir: str = "/var/lib/usb-sentinel/captures"
-
-
-@dataclass
 class APIConfig:
     """API server settings."""
 
-    enabled: bool = True
+    enabled: bool = False
     host: str = "127.0.0.1"
     port: int = 8000
     cors_enabled: bool = True
@@ -152,7 +141,6 @@ class SentinelConfig:
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
     analyzer: AnalyzerConfig = field(default_factory=AnalyzerConfig)
     interceptor: InterceptorConfig = field(default_factory=InterceptorConfig)
-    proxy: ProxyConfig = field(default_factory=ProxyConfig)
     api: APIConfig = field(default_factory=APIConfig)
     alerts: AlertConfig = field(default_factory=AlertConfig)
 
@@ -165,7 +153,6 @@ class SentinelConfig:
             database=DatabaseConfig(**data.get("database", {})),
             analyzer=AnalyzerConfig(**data.get("analyzer", {})),
             interceptor=InterceptorConfig(**data.get("interceptor", {})),
-            proxy=ProxyConfig(**data.get("proxy", {})),
             api=APIConfig(**data.get("api", {})),
             alerts=AlertConfig(**data.get("alerts", {})),
         )
@@ -246,8 +233,6 @@ def validate_config(config: SentinelConfig) -> list[str]:
     # Validate port ranges
     if not (1 <= config.api.port <= 65535):
         errors.append(f"Invalid API port: {config.api.port}")
-    if not (1 <= config.proxy.port <= 65535):
-        errors.append(f"Invalid proxy port: {config.proxy.port}")
 
     # Validate alert threshold
     if not (0 <= config.alerts.threshold <= 100):
