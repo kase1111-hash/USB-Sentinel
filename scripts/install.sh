@@ -155,10 +155,6 @@ install_udev() {
     cp "$SCRIPT_DIR/usb-sentinel-intercept" "$INSTALL_PREFIX/bin/"
     chmod 755 "$INSTALL_PREFIX/bin/usb-sentinel-intercept"
 
-    # Copy notify script
-    cp "$SCRIPT_DIR/usb-sentinel-notify" "$INSTALL_PREFIX/bin/"
-    chmod 755 "$INSTALL_PREFIX/bin/usb-sentinel-notify"
-
     # Reload udev rules
     if command -v udevadm &> /dev/null; then
         udevadm control --reload-rules

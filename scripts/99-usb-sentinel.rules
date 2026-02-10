@@ -33,7 +33,7 @@ ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", \
 # Notify USB Sentinel when devices are removed for audit logging
 
 ACTION=="remove", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", \
-    RUN+="/opt/usb-sentinel/bin/usb-sentinel-notify remove %k"
+    RUN+="/opt/usb-sentinel/bin/usb-sentinel-intercept %k %p"
 
 # ------------------------------------------------------------------------------
 # Trusted device classes (optional fast-path)
@@ -55,11 +55,11 @@ ACTION=="remove", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", \
 
 # Example: Logitech Unifying Receiver
 # ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="046d", ATTR{idProduct}=="c534", \
-#     ATTR{authorized}="1", RUN+="/opt/usb-sentinel/bin/usb-sentinel-notify allow %k"
+#     ATTR{authorized}="1"
 
 # Example: Intel Bluetooth
 # ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="8087", \
-#     ATTR{authorized}="1", RUN+="/opt/usb-sentinel/bin/usb-sentinel-notify allow %k"
+#     ATTR{authorized}="1"
 
 # ------------------------------------------------------------------------------
 # Known malicious devices (blacklist by VID:PID)
@@ -68,8 +68,8 @@ ACTION=="remove", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", \
 
 # CH340 serial adapter (common in attack hardware)
 ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="1a86", ATTR{idProduct}=="7523", \
-    ATTR{authorized}="0", RUN+="/opt/usb-sentinel/bin/usb-sentinel-notify block %k 'Known attack hardware signature'"
+    ATTR{authorized}="0"
 
 # STM32 DFU mode (firmware update - high risk)
 ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0483", ATTR{idProduct}=="df11", \
-    ATTR{authorized}="0", RUN+="/opt/usb-sentinel/bin/usb-sentinel-notify block %k 'DFU mode device blocked'"
+    ATTR{authorized}="0"
