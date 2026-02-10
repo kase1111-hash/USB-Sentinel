@@ -202,6 +202,9 @@ def validate_config(config: SentinelConfig) -> list[str]:
     """
     Validate configuration and return list of errors.
 
+    Fail-fast: every check produces a clear, actionable message so the
+    operator can fix the config before the daemon starts.
+
     Args:
         config: Configuration to validate.
 
@@ -210,37 +213,65 @@ def validate_config(config: SentinelConfig) -> list[str]:
     """
     errors: list[str] = []
 
-    # Validate log level
+    # --- Daemon ---
     valid_log_levels = {"debug", "info", "warning", "error"}
     if config.daemon.log_level not in valid_log_levels:
         errors.append(f"Invalid log_level: {config.daemon.log_level}")
 
-    # Validate default action
+    # --- Policy ---
     valid_actions = {"allow", "block", "review"}
     if config.policy.default_action not in valid_actions:
         errors.append(f"Invalid default_action: {config.policy.default_action}")
 
-    # Validate analyzer provider
+    # --- Analyzer ---
     valid_providers = {"anthropic", "local"}
     if config.analyzer.provider not in valid_providers:
         errors.append(f"Invalid analyzer provider: {config.analyzer.provider}")
 
-    # Validate API key presence when analyzer is enabled
     if config.analyzer.enabled and config.analyzer.provider == "anthropic":
         if not config.analyzer.api_key:
             errors.append("Anthropic API key required when analyzer is enabled")
 
-    # Validate port ranges
+    # --- Interceptor: validate bypass_classes ---
+    for cls_code in config.interceptor.bypass_classes:
+        if not isinstance(cls_code, int) or not (0x00 <= cls_code <= 0xFF):
+            errors.append(
+                f"Invalid USB class code in bypass_classes: {cls_code!r} "
+                "(must be integer 0x00-0xFF)"
+            )
+
+    # --- API ---
     if not (1 <= config.api.port <= 65535):
         errors.append(f"Invalid API port: {config.api.port}")
 
-    # Validate alert threshold
+    valid_auth_modes = {"none", "api_key"}
+    if config.api.auth_mode not in valid_auth_modes:
+        errors.append(f"Invalid auth_mode: {config.api.auth_mode}")
+
+    for origin in config.api.cors_origins:
+        if not origin.startswith(("http://", "https://")):
+            errors.append(
+                f"Invalid CORS origin: {origin!r} "
+                "(must start with http:// or https://)"
+            )
+
+    # --- Alerts ---
     if not (0 <= config.alerts.threshold <= 100):
         errors.append(f"Invalid alert threshold: {config.alerts.threshold}")
 
-    # Validate auth mode
-    valid_auth_modes = {"none", "api_key", "mtls"}
-    if config.api.auth_mode not in valid_auth_modes:
-        errors.append(f"Invalid auth_mode: {config.api.auth_mode}")
+    if config.alerts.methods.webhook:
+        url = config.alerts.methods.webhook
+        if not url.startswith(("http://", "https://")):
+            errors.append(
+                f"Invalid webhook URL: {url!r} "
+                "(must start with http:// or https://)"
+            )
+
+    # --- Database: check parent directory is writable ---
+    db_parent = Path(config.database.path).parent
+    if db_parent.exists() and not os.access(db_parent, os.W_OK):
+        errors.append(
+            f"Database directory not writable: {db_parent}"
+        )
 
     return errors

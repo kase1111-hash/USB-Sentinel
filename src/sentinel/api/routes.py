@@ -547,7 +547,7 @@ async def update_policy(
 
     # Update engine
     engine.update_rules(new_rules)
-    logger.info(f"Policy updated: {len(new_rules)} rules by {api_key.name}")
+    logger.info("Policy updated: %d rules by %s", len(new_rules), api_key.name)
 
     # Return updated policy
     return await get_policy(request, api_key)
