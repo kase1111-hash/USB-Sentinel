@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING
 
+from sentinel.interceptor.constants import TRUSTED_VENDORS
+
 if TYPE_CHECKING:
     from sentinel.interceptor.descriptors import DeviceDescriptor
 
@@ -327,11 +329,22 @@ class DescriptorValidator:
                 )
             )
 
-        # Generic strings
+        # Generic strings. Budget models from established vendors often have
+        # product names like "USB Keyboard" (e.g. Logitech K120), so a generic
+        # product name is only suspicious when the manufacturer string does
+        # not match the vendor registered for the VID.
+        vendor = TRUSTED_VENDORS.get(descriptor.vid.lower())
+        vendor_verified = bool(
+            vendor
+            and descriptor.manufacturer
+            and vendor.name.split()[0].lower() in descriptor.manufacturer.lower()
+        )
         for field_name, value in [
             ("manufacturer", descriptor.manufacturer),
             ("product", descriptor.product),
         ]:
+            if field_name == "product" and vendor_verified:
+                continue
             if value and value.lower().strip() in GENERIC_STRINGS:
                 result.add_anomaly(
                     Anomaly(
