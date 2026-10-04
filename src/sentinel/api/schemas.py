@@ -10,7 +10,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # ============================================================================
 # Enums
@@ -152,20 +152,34 @@ class EventQuery(BaseModel):
 
 
 class MatchConditionSchema(BaseModel):
-    """Policy match condition schema."""
+    """Policy match condition schema.
+
+    Unknown keys are rejected: a dropped key would widen the rule.
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     vid: str | None = None
     pid: str | None = None
     vid_list: list[str] | None = None
     pid_list: list[str] | None = None
+    vid_range: list[str] | None = None
     device_class: int | str | None = None
     interface_class: int | str | None = None
+    class_list: list[int | str] | None = None
     manufacturer: str | None = None
     product: str | None = None
     serial: str | None = None
     has_storage_endpoint: bool | None = None
     has_hid_endpoint: bool | None = None
+    has_bulk_endpoint: bool | None = None
     is_composite: bool | None = None
+    is_keyboard: bool | None = None
+    is_mouse: bool | None = None
+    endpoint_count_gt: int | None = None
+    endpoint_count_lt: int | None = None
+    interface_count_gt: int | None = None
+    interface_count_lt: int | None = None
     first_seen: bool | None = None
     trust_level: str | None = None
     match_all: bool = False

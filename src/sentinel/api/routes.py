@@ -40,6 +40,9 @@ from sentinel.api.schemas import (
     SystemStatistics,
     TrustLevel,
 )
+from sentinel.policy.models import Policy
+from sentinel.policy.parser import PolicyParseError, parse_policy
+from sentinel.policy.parser import validate_policy as validate_parsed_policy
 
 logger = logging.getLogger(__name__)
 
@@ -520,29 +523,10 @@ async def update_policy(
     await check_rate_limit(request, api_key)
     engine = get_policy_engine()
 
-    # Convert to internal format
-    from sentinel.policy.models import Action, MatchCondition, PolicyRule
-
-    new_rules = []
-    for rule_schema in policy.rules:
-        if isinstance(rule_schema.match, str) and rule_schema.match == "*":
-            match = MatchCondition(match_all=True)
-        else:
-            match_dict = (
-                rule_schema.match.model_dump()
-                if hasattr(rule_schema.match, "model_dump")
-                else rule_schema.match
-            )
-            match = MatchCondition.from_dict(match_dict)
-
-        new_rules.append(
-            PolicyRule(
-                match=match,
-                action=Action(rule_schema.action.value),
-                comment=rule_schema.comment,
-                priority=rule_schema.priority,
-            )
-        )
+    try:
+        new_rules = _schema_to_policy(policy).rules
+    except PolicyParseError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
 
     # Update engine
     engine.update_rules(new_rules)
@@ -550,6 +534,28 @@ async def update_policy(
 
     # Return updated policy
     return await get_policy(request, api_key)
+
+
+def _schema_to_policy(policy: PolicySchema) -> Policy:
+    """Convert an API policy payload through the same strict parser as policy.yaml."""
+    rules: list[dict[str, Any]] = []
+    for rule_schema in policy.rules:
+        match = rule_schema.match
+        if isinstance(match, str):
+            match_data: Any = match
+        elif match.match_all:
+            match_data = "*"
+        else:
+            match_data = match.model_dump(exclude_none=True, exclude={"match_all"})
+        rules.append(
+            {
+                "match": match_data,
+                "action": rule_schema.action.value,
+                "comment": rule_schema.comment,
+                "priority": rule_schema.priority,
+            }
+        )
+    return parse_policy({"rules": rules})
 
 
 @router.post(
@@ -569,27 +575,13 @@ async def validate_policy(
     """
     await check_rate_limit(request, api_key)
 
-    errors = []
-    warnings = []
+    errors: list[str] = []
+    warnings: list[str] = []
 
-    # Check for duplicate rules
-    seen_matches = set()
-    for i, rule in enumerate(policy.rules):
-        match_key = str(rule.match)
-        if match_key in seen_matches:
-            warnings.append(f"Rule {i + 1}: Duplicate match condition")
-        seen_matches.add(match_key)
-
-        # Validate action
-        if rule.action not in ActionType:
-            errors.append(f"Rule {i + 1}: Invalid action '{rule.action}'")
-
-    # Check for wildcard not at end
-    for i, rule in enumerate(policy.rules[:-1]):
-        if isinstance(rule.match, str) and rule.match == "*":
-            warnings.append(
-                f"Rule {i + 1}: Wildcard rule not at end - subsequent rules unreachable"
-            )
+    try:
+        warnings = validate_parsed_policy(_schema_to_policy(policy))
+    except PolicyParseError as e:
+        errors.append(str(e))
 
     return PolicyValidationResult(
         valid=len(errors) == 0,

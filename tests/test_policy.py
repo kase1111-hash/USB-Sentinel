@@ -251,6 +251,110 @@ class TestPolicyParser:
 # =============================================================================
 
 
+class TestStrictParsing:
+    """A match key the parser drops widens the rule to every device, so be strict."""
+
+    @pytest.mark.parametrize(
+        "match",
+        [
+            {"vendor": "046d"},  # typo of vid
+            {"vid": "046d", "is_keybaord": True},  # typo next to a valid key
+            {},  # empty match
+        ],
+    )
+    def test_rejects_matches_that_would_widen(self, match: dict) -> None:
+        with pytest.raises(PolicyParseError):
+            parse_rule({"match": match, "action": "allow"})
+
+    def test_rejects_unknown_rule_key(self) -> None:
+        with pytest.raises(PolicyParseError, match="Unknown rule key"):
+            parse_rule({"match": "*", "actoin": "allow", "action": "review"})
+
+    @pytest.mark.parametrize("vid", [1234, "46d", "zzzz", None])
+    def test_rejects_malformed_vid(self, vid: object) -> None:
+        with pytest.raises(PolicyParseError, match="vid"):
+            parse_rule({"match": {"vid": vid}, "action": "allow"})
+
+    def test_rejects_invalid_regex_at_load_time(self) -> None:
+        with pytest.raises(PolicyParseError, match="Invalid regex"):
+            parse_rule({"match": {"product": "(unclosed"}, "action": "block"})
+
+    def test_rejects_out_of_range_class(self) -> None:
+        with pytest.raises(PolicyParseError, match="out of range"):
+            parse_rule({"match": {"class": 256}, "action": "block"})
+
+    def test_null_string_means_missing(self) -> None:
+        rule = parse_rule({"match": {"manufacturer": None}, "action": "review"})
+        matcher = RuleMatcher()
+
+        anonymous = create_test_descriptor(manufacturer=None)
+        blank = create_test_descriptor(manufacturer="   ")
+        named = create_test_descriptor(manufacturer="Logitech")
+
+        assert matcher.matches(rule.match, anonymous)
+        assert matcher.matches(rule.match, blank)
+        assert not matcher.matches(rule.match, named)
+
+    def test_previously_ignored_keys_are_honored(self) -> None:
+        """These keys used to be dropped silently, matching every device."""
+        keyboard = create_test_descriptor(vid="1234", interfaces=[(0x03, 0x01, 0x01)])
+        mouse = create_test_descriptor(vid="1234", interfaces=[(0x03, 0x01, 0x02)])
+        matcher = RuleMatcher()
+
+        cases = {
+            "is_keyboard": True,
+            "interface_class": "HID",
+            "vid_list": ["046d", "1234"],
+            "interface_count_lt": 2,
+        }
+        for key, value in cases.items():
+            cond = parse_rule({"match": {key: value}, "action": "allow"}).match
+            assert matcher.matches(cond, keyboard), key
+
+        cond = parse_rule({"match": {"is_keyboard": True}, "action": "allow"}).match
+        assert not matcher.matches(cond, mouse)
+
+        cond = parse_rule({"match": {"vid_list": ["046d"]}, "action": "allow"}).match
+        assert not matcher.matches(cond, keyboard)
+
+    def test_vid_is_normalized_to_lowercase(self) -> None:
+        rule = parse_rule({"match": {"vid": "046D"}, "action": "allow"})
+        assert rule.match.vid == "046d"
+
+    def test_shipped_policy_loads_and_class_rules_are_reachable(self) -> None:
+        """`manufacturer: null` in config/policy.yaml used to shadow every later rule."""
+        policy_path = Path(__file__).parent.parent / "config" / "policy.yaml"
+        engine = PolicyEngine(policy=load_policy(policy_path))
+
+        audio = create_test_descriptor(
+            vid="0d8c",
+            pid="0014",
+            manufacturer="C-Media Electronics Inc.",
+            product="USB Audio Device",
+            interfaces=[(0x01, 0x01, 0x00)],
+        )
+        result = engine.evaluate(audio)
+        assert result.action == Action.ALLOW
+        assert result.matched_rule is not None
+        assert "Audio" in result.matched_rule.comment
+
+        anonymous = create_test_descriptor(
+            vid="0d8c", pid="0014", manufacturer=None, interfaces=[(0x01, 0x01, 0x00)]
+        )
+        result = engine.evaluate(anonymous)
+        assert result.matched_rule is not None
+        assert "Missing manufacturer" in result.matched_rule.comment
+
+    def test_update_rules_replaces_policy(self, policy_engine: PolicyEngine) -> None:
+        before = policy_engine.last_modified
+        policy_engine.update_rules([PolicyRule(MatchCondition(match_all=True), Action.BLOCK)])
+
+        assert len(policy_engine.policy.rules) == 1
+        assert policy_engine.last_modified >= before
+        device = create_test_descriptor()
+        assert policy_engine.evaluate(device).action == Action.BLOCK
+
+
 class TestPolicyValidation:
     """Tests for policy validation."""
 

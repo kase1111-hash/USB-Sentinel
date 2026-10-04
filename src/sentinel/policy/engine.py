@@ -341,6 +341,7 @@ class PolicyEngine:
         self.default_action = default_action
         self.trust_lookup = trust_lookup
         self.matcher = RuleMatcher(self.fingerprint_db, trust_lookup)
+        self.last_modified = datetime.now(timezone.utc)
 
         # Statistics
         self._evaluations = 0
@@ -482,10 +483,20 @@ class PolicyEngine:
         """
         policy = load_policy(policy_path)
         errors = validate_policy(policy)
-        self.policy = policy
-        self.matcher = RuleMatcher(self.fingerprint_db)
+        self.update_rules(policy.rules)
         logger.info("Policy reloaded: %d rules", len(policy.rules))
         return errors
+
+    def update_rules(self, rules: list[PolicyRule]) -> None:
+        """
+        Replace the active rule set.
+
+        Args:
+            rules: New ordered list of rules
+        """
+        self.policy = Policy(rules=list(rules))
+        self.matcher = RuleMatcher(self.fingerprint_db, self.trust_lookup)
+        self.last_modified = datetime.now(timezone.utc)
 
     def get_statistics(self) -> dict:
         """Get evaluation statistics."""

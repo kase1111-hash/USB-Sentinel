@@ -620,6 +620,33 @@ class TestPolicyEndpoints:
         data = response.json()
         assert data["valid"] is True
 
+    @pytest.mark.parametrize(
+        "match",
+        [{}, {"vendor": "046d"}, {"vid": "046d", "is_keybaord": True}],
+    )
+    def test_validate_policy_rejects_widening_matches(self, configured_client, match):
+        """Unknown or empty match keys must not silently become match-everything."""
+        client, api_key = configured_client
+        response = client.post(
+            "/api/policy/validate",
+            json={"rules": [{"match": match, "action": "allow"}]},
+            headers={"X-API-Key": api_key},
+        )
+        if response.status_code == 200:
+            assert response.json()["valid"] is False
+        else:
+            assert response.status_code == 422
+
+    def test_update_policy_rejects_empty_match(self, configured_client, mock_policy_engine):
+        client, api_key = configured_client
+        response = client.put(
+            "/api/policy",
+            json={"rules": [{"match": {}, "action": "allow"}]},
+            headers={"X-API-Key": api_key},
+        )
+        assert response.status_code == 422
+        mock_policy_engine.update_rules.assert_not_called()
+
 
 # ============================================================================
 # Statistics Endpoint Tests
