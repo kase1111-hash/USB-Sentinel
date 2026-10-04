@@ -5,11 +5,11 @@
 daemon:
   # Run as background daemon
   daemonize: false
-  # PID file location
-  pid_file: /var/run/usb-sentinel.pid
+  # PID file location (used by `usb-sentinel status/stop/policy reload`)
+  pid_file: /run/usb-sentinel/sentinel.pid
   # Log level: debug, info, warning, error
   log_level: info
-  # Log file (null for stdout)
+  # Log file in addition to stderr/journal (null to disable)
   log_file: /var/log/usb-sentinel.log
 
 # Policy settings
@@ -18,7 +18,8 @@ policy:
   rules_file: /etc/usb-sentinel/policy.yaml
   # Default action when no rules match: allow, block, review
   default_action: review
-  # Enable hot-reload of policy file
+  # Reload the policy when the file changes (SIGHUP also reloads).
+  # A policy that fails to parse is rejected and the previous one kept.
   hot_reload: true
 
 # Database settings
@@ -27,22 +28,29 @@ database:
   path: /var/lib/usb-sentinel/audit.db
   # Enable WAL mode for better concurrency
   wal_mode: true
-  # Backup interval in hours (0 to disable)
-  backup_interval: 24
 
 # LLM Analyzer settings
+#
+# Devices that policy sends to review are always scored by the local
+# descriptor validator and heuristics. When an API key is available the LLM
+# adds its own score; the highest score wins, so the LLM can raise risk but
+# never talk a device past the local checks.
 analyzer:
   # Enable LLM analysis for REVIEW verdicts
   enabled: true
   # API provider: anthropic, local
   provider: anthropic
   # Model to use
-  model: claude-sonnet-4-20250514
-  # API key (use environment variable ANTHROPIC_API_KEY)
+  model: claude-sonnet-5-5
+  # Reasoning effort (low, medium, high, xhigh, max). Low keeps per-device
+  # latency down. Remove this line for models that do not support effort.
+  effort: low
+  # API key (use environment variable ANTHROPIC_API_KEY, e.g. in
+  # /etc/usb-sentinel/environment). Without one, only local scoring runs.
   api_key: null
   # Maximum tokens for analysis response
   max_tokens: 1024
-  # Request timeout in seconds
+  # Request timeout in seconds (also bounded by interceptor.analysis_timeout)
   timeout: 30
   # Rate limit: max requests per minute
   rate_limit: 60
@@ -56,11 +64,15 @@ analyzer:
 interceptor:
   # Platform: linux, windows, auto
   platform: auto
-  # Block devices during analysis (requires root)
+  # Keep newly attached devices unbound (no driver, cannot type or mount)
+  # until they are evaluated. Sets authorized_default=0 on every USB bus
+  # while the daemon runs and restores it on shutdown. Requires root.
+  # Devices already attached when the daemon starts are left alone.
   block_during_analysis: true
-  # Analysis timeout in seconds (device blocked until complete or timeout)
+  # Seconds to wait for the LLM before deciding on local scoring alone
   analysis_timeout: 10
-  # Allowed USB classes that bypass review (use with caution)
+  # USB class codes that skip review when every interface has one of them
+  # (e.g. [0x01] for audio-only devices). Use with caution.
   bypass_classes: []
 
 # API server settings (optional — enable for dashboard/remote management)
@@ -84,15 +96,14 @@ api:
 
 # Alert settings
 alerts:
-  # Enable alerts for high-risk events
+  # Alert when a device is blocked or held for review
   enabled: true
-  # Risk score threshold for alerts (0-100)
-  threshold: 75
+  # Minimum risk score for alerts on analyzer verdicts (held devices score
+  # 51-75, blocked 76-100). Blocks by a rule or operator always alert.
+  threshold: 50
   # Alert methods
   methods:
-    # Desktop notification
-    desktop: true
-    # Syslog
+    # Log the alert at WARNING level (journal/syslog)
     syslog: true
-    # Webhook URL (null to disable)
+    # Webhook URL: receives a JSON POST per alert (null to disable)
     webhook: null

@@ -111,14 +111,34 @@ class TestValidateConfig:
         errors = validate_config(config)
         assert any("default_action" in e for e in errors)
 
-    def test_missing_api_key(self) -> None:
-        """Test validation catches missing API key when analyzer enabled."""
+    def test_missing_api_key_is_not_fatal(self) -> None:
+        """Without an API key the daemon runs on local heuristics, so it must start."""
         config = SentinelConfig()
         config.analyzer.enabled = True
         config.analyzer.api_key = None
+        config.database.path = "/nonexistent-dir-for-test/audit.db"
 
-        errors = validate_config(config)
-        assert any("API key" in e for e in errors)
+        assert validate_config(config) == []
+
+    def test_shipped_config_is_valid_without_api_key(self, monkeypatch) -> None:
+        """config/sentinel.yaml must start as shipped, with no ANTHROPIC_API_KEY set."""
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        shipped = Path(__file__).parent.parent / "config" / "sentinel.yaml"
+        config = load_config(shipped)
+        config.database.path = "/nonexistent-dir-for-test/audit.db"
+
+        assert validate_config(config) == []
+
+    def test_unknown_setting_names_section(self, tmp_path: Path) -> None:
+        bad = tmp_path / "sentinel.yaml"
+        bad.write_text("analyzer:\n  modle: claude-sonnet-5-5\n")
+        with pytest.raises(ValueError, match="analyzer"):
+            load_config(bad)
+
+    def test_invalid_effort(self) -> None:
+        config = SentinelConfig()
+        config.analyzer.effort = "turbo"
+        assert any("effort" in e for e in validate_config(config))
 
     def test_invalid_port(self) -> None:
         """Test validation catches invalid port numbers."""

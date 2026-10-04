@@ -280,8 +280,14 @@ class DescriptorValidator:
             )
 
         # Check device class vs interface class consistency
-        # Device class should match interface classes
-        if descriptor.device_class != 0 and descriptor.device_class not in interface_classes:
+        # Device class should match interface classes. 0x00 defers to the
+        # interfaces and 0xEF (Miscellaneous / IAD) is the standard class for
+        # composite devices such as webcams, so neither is a mismatch.
+        if (
+            descriptor.device_class not in (0x00, 0xEF)
+            and descriptor.interfaces
+            and descriptor.device_class not in interface_classes
+        ):
             result.add_anomaly(
                 Anomaly(
                     anomaly_type=AnomalyType.CLASS_MISMATCH,
@@ -376,8 +382,11 @@ class DescriptorValidator:
                     )
                 )
 
-            # Check expected endpoints for class
-            if intf.interface_class in EXPECTED_ENDPOINTS:
+            # Check expected endpoints for class. Zero endpoints is normal
+            # (audio control interfaces, zero-bandwidth alternate setting 0
+            # of audio/video streaming and CDC data), so only judge
+            # interfaces that declare some.
+            if intf.interface_class in EXPECTED_ENDPOINTS and intf.num_endpoints:
                 min_ep, max_ep = EXPECTED_ENDPOINTS[intf.interface_class]
                 if not (min_ep <= intf.num_endpoints <= max_ep):
                     result.add_anomaly(

@@ -1,7 +1,7 @@
 """
 Benchmark descriptor dataset for evaluating detection accuracy.
 
-Contains 25 malicious and 25 benign USB device descriptors modeled
+Contains 25 malicious and 28 benign USB device descriptors modeled
 after real-world hardware.  Each entry carries a ground-truth label
 so the benchmark harness can compute TP / FP / TN / FN.
 """
@@ -809,6 +809,70 @@ BENIGN: list[LabeledDescriptor] = [
             intfs=[
                 _intf(0x01, 0x01, 0x00, num_ep=1),  # audio control
                 _intf(0x01, 0x02, 0x00, num_ep=1),  # audio streaming
+            ],
+        ),
+    ),
+    # --- 26-28: everyday hardware with less tidy descriptors ---
+    # --- 26. No-name keyboard (generic product string, extra HID iface) ---
+    LabeledDescriptor(
+        name="No-name USB keyboard (generic strings)",
+        is_malicious=False,
+        descriptor=_desc(
+            vid="1c4f",
+            pid="0002",
+            mfr="SIGMACHIP",
+            prod="USB Keyboard",
+            intfs=[
+                _intf(0x03, 0x01, 0x01, num_ep=1),  # boot keyboard
+                _intf(0x03, 0x00, 0x00, num_ep=1),  # consumer control keys
+            ],
+        ),
+    ),
+    # --- 27. UVC webcam: IAD device class, zero-bandwidth alt setting ---
+    LabeledDescriptor(
+        name="UVC webcam (IAD, alt settings)",
+        is_malicious=False,
+        descriptor=_desc(
+            vid="0c45",
+            pid="6366",
+            mfr="Sonix Technology Co., Ltd.",
+            prod="USB 2.0 Camera",
+            dev_class=0xEF,
+            intfs=[
+                _intf(0x0E, 0x01, 0x00, num_ep=1),  # video control
+                _intf(0x0E, 0x02, 0x00, num_ep=0, eps=[]),  # streaming, alt 0
+                _intf(
+                    0x0E,
+                    0x02,
+                    0x00,
+                    num_ep=1,
+                    eps=[
+                        EndpointDescriptor(
+                            address=0x82, attributes=0x05, max_packet_size=3072, interval=1
+                        )
+                    ],
+                ),  # streaming, alt 1 (isochronous)
+            ],
+        ),
+    ),
+    # --- 28. USB 3 SSD enclosure: BOT alt 0 + UAS alt 1 (4 endpoints) ---
+    LabeledDescriptor(
+        name="USB 3 SSD enclosure (UAS)",
+        is_malicious=False,
+        descriptor=_desc(
+            vid="152d",
+            pid="0578",
+            mfr="JMicron",
+            prod="USB to ATA/ATAPI Bridge",
+            intfs=[
+                _intf(0x08, 0x06, 0x50, num_ep=2, eps=[_bulk_ep(0x81), _bulk_ep(0x02)]),
+                _intf(
+                    0x08,
+                    0x06,
+                    0x62,
+                    num_ep=4,
+                    eps=[_bulk_ep(0x81), _bulk_ep(0x02), _bulk_ep(0x83), _bulk_ep(0x04)],
+                ),
             ],
         ),
     ),
