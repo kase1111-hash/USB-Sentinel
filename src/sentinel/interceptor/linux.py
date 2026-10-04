@@ -478,7 +478,7 @@ class USBInterceptor:
         self,
         block_during_analysis: bool = True,
         analysis_timeout: float = 10.0,
-        sysfs_root: Path = sysfs.SYSFS_USB_DEVICES,
+        sysfs_root: Path | None = None,
     ) -> None:
         """
         Initialize the interceptor.

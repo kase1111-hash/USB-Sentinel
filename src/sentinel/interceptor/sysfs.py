@@ -166,8 +166,9 @@ def read_device(sys_path: str | Path) -> DeviceDescriptor:
     )
 
 
-def iter_devices(root: Path = SYSFS_USB_DEVICES) -> Iterator[Path]:
+def iter_devices(root: Path | None = None) -> Iterator[Path]:
     """Yield resolved sysfs paths of USB devices, excluding root hubs and interfaces."""
+    root = root or SYSFS_USB_DEVICES
     if not root.is_dir():
         return
     for entry in sorted(root.iterdir()):
@@ -177,8 +178,9 @@ def iter_devices(root: Path = SYSFS_USB_DEVICES) -> Iterator[Path]:
         yield entry.resolve()
 
 
-def iter_root_hubs(root: Path = SYSFS_USB_DEVICES) -> Iterator[Path]:
+def iter_root_hubs(root: Path | None = None) -> Iterator[Path]:
     """Yield resolved sysfs paths of root hubs (one per USB bus)."""
+    root = root or SYSFS_USB_DEVICES
     if not root.is_dir():
         return
     for entry in sorted(root.iterdir()):
@@ -229,7 +231,7 @@ class DefaultDenyGuard:
     until it restarts: the guard fails closed.
     """
 
-    def __init__(self, root: Path = SYSFS_USB_DEVICES) -> None:
+    def __init__(self, root: Path | None = None) -> None:
         self.root = root
         self._saved: dict[Path, str] = {}
 

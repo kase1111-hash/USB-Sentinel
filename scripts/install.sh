@@ -2,10 +2,11 @@
 #
 # USB Sentinel Installation Script
 #
-# Installs USB Sentinel system-wide with all dependencies.
+# Installs USB Sentinel into a virtualenv under $INSTALL_PREFIX, with
+# configuration in $CONFIG_DIR and a systemd service.
 #
 
-set -e
+set -euo pipefail
 
 # Colors for output
 RED='\033[0;31m'
@@ -17,11 +18,13 @@ NC='\033[0m' # No Color
 INSTALL_PREFIX="${INSTALL_PREFIX:-/opt/usb-sentinel}"
 CONFIG_DIR="${CONFIG_DIR:-/etc/usb-sentinel}"
 DATA_DIR="${DATA_DIR:-/var/lib/usb-sentinel}"
-LOG_DIR="${LOG_DIR:-/var/log}"
+BIN_DIR="${BIN_DIR:-/usr/local/bin}"
 SYSTEMD_DIR="/etc/systemd/system"
-UDEV_DIR="/etc/udev/rules.d"
 
-# Print colored message
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+VENV="$INSTALL_PREFIX/venv"
+
 log_info() {
     echo -e "${GREEN}[INFO]${NC} $1"
 }
@@ -34,7 +37,6 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
-# Check if running as root
 check_root() {
     if [[ $EUID -ne 0 ]]; then
         log_error "This script must be run as root"
@@ -43,216 +45,151 @@ check_root() {
     fi
 }
 
-# Check dependencies
 check_dependencies() {
     log_info "Checking dependencies..."
 
-    # Check Python version
     if ! command -v python3 &> /dev/null; then
         log_error "Python 3 is required but not installed"
         exit 1
     fi
 
-    PYTHON_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-    if [[ $(echo "$PYTHON_VERSION < 3.10" | bc -l) -eq 1 ]]; then
-        log_error "Python 3.10+ is required (found $PYTHON_VERSION)"
+    if ! python3 -c 'import sys; sys.exit(sys.version_info < (3, 10))'; then
+        log_error "Python 3.10+ is required (found $(python3 --version 2>&1))"
         exit 1
     fi
-    log_info "Python version: $PYTHON_VERSION"
+    log_info "Using $(python3 --version 2>&1)"
 
-    # Check pip
-    if ! command -v pip3 &> /dev/null; then
-        log_error "pip3 is required but not installed"
+    if ! python3 -c 'import venv, ensurepip' &> /dev/null; then
+        log_error "Python venv support is missing (Debian/Ubuntu: apt install python3-venv)"
         exit 1
     fi
 
-    # Check for optional dependencies
-    if command -v udevadm &> /dev/null; then
-        log_info "udev tools found"
-    else
-        log_warn "udevadm not found - udev rules may not work"
+    if [[ ! -d /sys/bus/usb/devices ]]; then
+        log_warn "/sys/bus/usb/devices not found - the daemon will have no USB buses to protect"
     fi
 }
 
-# Create directories
 create_directories() {
     log_info "Creating directories..."
 
-    mkdir -p "$INSTALL_PREFIX"
-    mkdir -p "$INSTALL_PREFIX/bin"
-    mkdir -p "$CONFIG_DIR"
-    mkdir -p "$DATA_DIR"
-    mkdir -p "$DATA_DIR/captures"
-    mkdir -p "$DATA_DIR/models"
-
-    # Set permissions
-    chmod 755 "$INSTALL_PREFIX"
-    chmod 755 "$CONFIG_DIR"
+    mkdir -p "$INSTALL_PREFIX" "$CONFIG_DIR" "$DATA_DIR"
+    chmod 755 "$INSTALL_PREFIX" "$CONFIG_DIR"
     chmod 700 "$DATA_DIR"
-
-    log_info "Directories created"
 }
 
-# Install Python package
 install_package() {
-    log_info "Installing USB Sentinel Python package..."
+    log_info "Installing USB Sentinel into $VENV..."
 
-    # Get the script's directory (should be in scripts/)
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+    # A virtualenv avoids "externally-managed-environment" errors (PEP 668)
+    # and keeps the daemon independent of the source checkout.
+    python3 -m venv "$VENV"
+    "$VENV/bin/pip" install --quiet --upgrade pip
+    "$VENV/bin/pip" install --quiet "$PROJECT_DIR"
 
-    # Install the package
-    pip3 install -e "$PROJECT_DIR"
+    ln -sf "$VENV/bin/usb-sentinel" "$BIN_DIR/usb-sentinel"
+    ln -sf "$VENV/bin/sentinel-daemon" "$BIN_DIR/sentinel-daemon"
 
-    # Create symlinks to CLI tools
-    ln -sf "$(which usb-sentinel)" "$INSTALL_PREFIX/bin/usb-sentinel"
-    ln -sf "$(which sentinel-daemon)" "$INSTALL_PREFIX/bin/sentinel-daemon"
-
-    log_info "Python package installed"
+    log_info "Installed: $BIN_DIR/usb-sentinel, $BIN_DIR/sentinel-daemon"
 }
 
-# Install configuration files
 install_config() {
     log_info "Installing configuration files..."
 
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+    for file in sentinel.yaml policy.yaml; do
+        if [[ ! -f "$CONFIG_DIR/$file" ]]; then
+            cp "$PROJECT_DIR/config/$file" "$CONFIG_DIR/$file"
+            chmod 600 "$CONFIG_DIR/$file"
+            log_info "Created $CONFIG_DIR/$file"
+        else
+            log_warn "$CONFIG_DIR/$file already exists, leaving it unchanged"
+        fi
+    done
 
-    # Copy configuration files if they don't exist
-    if [[ ! -f "$CONFIG_DIR/sentinel.yaml" ]]; then
-        cp "$PROJECT_DIR/config/sentinel.yaml" "$CONFIG_DIR/sentinel.yaml"
-        chmod 600 "$CONFIG_DIR/sentinel.yaml"
-        log_info "Created sentinel.yaml"
-    else
-        log_warn "sentinel.yaml already exists, skipping"
+    if [[ ! -f "$CONFIG_DIR/environment" ]]; then
+        cat > "$CONFIG_DIR/environment" <<'ENV'
+# Environment for the usb-sentinel service.
+# Uncomment to enable LLM analysis (without it, local checks still run):
+#ANTHROPIC_API_KEY=
+ENV
+        chmod 600 "$CONFIG_DIR/environment"
+        log_info "Created $CONFIG_DIR/environment"
     fi
 
-    if [[ ! -f "$CONFIG_DIR/policy.yaml" ]]; then
-        cp "$PROJECT_DIR/config/policy.yaml" "$CONFIG_DIR/policy.yaml"
-        chmod 600 "$CONFIG_DIR/policy.yaml"
-        log_info "Created policy.yaml"
-    else
-        log_warn "policy.yaml already exists, skipping"
-    fi
-
-    # Set ownership
     chown root:root "$CONFIG_DIR"/*
 
-    log_info "Configuration files installed"
-}
-
-# Install udev rules
-install_udev() {
-    log_info "Installing udev rules..."
-
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-    # Copy udev rules
-    cp "$SCRIPT_DIR/99-usb-sentinel.rules" "$UDEV_DIR/"
-    chmod 644 "$UDEV_DIR/99-usb-sentinel.rules"
-
-    # Copy intercept script
-    cp "$SCRIPT_DIR/usb-sentinel-intercept" "$INSTALL_PREFIX/bin/"
-    chmod 755 "$INSTALL_PREFIX/bin/usb-sentinel-intercept"
-
-    # Reload udev rules
-    if command -v udevadm &> /dev/null; then
-        udevadm control --reload-rules
-        udevadm trigger
-        log_info "udev rules reloaded"
-    else
-        log_warn "Could not reload udev rules - reboot may be required"
+    # Validate what is installed now
+    if ! "$VENV/bin/usb-sentinel" -c "$CONFIG_DIR/sentinel.yaml" policy validate; then
+        log_error "Policy validation failed - fix $CONFIG_DIR/policy.yaml before starting"
+        exit 1
     fi
-
-    log_info "udev rules installed"
 }
 
-# Install systemd service
 install_systemd() {
     log_info "Installing systemd service..."
 
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-    # Copy service file
-    cp "$SCRIPT_DIR/usb-sentinel.service" "$SYSTEMD_DIR/"
+    sed "s|/opt/usb-sentinel|$INSTALL_PREFIX|g" \
+        "$SCRIPT_DIR/usb-sentinel.service" > "$SYSTEMD_DIR/usb-sentinel.service"
     chmod 644 "$SYSTEMD_DIR/usb-sentinel.service"
 
-    # Reload systemd
-    systemctl daemon-reload
-
-    log_info "systemd service installed"
+    if command -v systemctl &> /dev/null; then
+        systemctl daemon-reload
+    else
+        log_warn "systemctl not found - start the daemon with: sentinel-daemon -c $CONFIG_DIR/sentinel.yaml"
+    fi
 }
 
-# Create database
-initialize_database() {
-    log_info "Initializing database..."
-
-    # The database will be created on first run
-    touch "$DATA_DIR/audit.db"
-    chmod 600 "$DATA_DIR/audit.db"
-
-    log_info "Database initialized"
+remove_legacy_hook() {
+    # Earlier versions installed a udev hook that authorized every device
+    # when it could not reach the daemon, which defeats default-deny.
+    if [[ -f /etc/udev/rules.d/99-usb-sentinel.rules ]]; then
+        rm -f /etc/udev/rules.d/99-usb-sentinel.rules
+        rm -f "$INSTALL_PREFIX/bin/usb-sentinel-intercept"
+        command -v udevadm &> /dev/null && udevadm control --reload-rules
+        log_info "Removed legacy udev hook"
+    fi
 }
 
-# Print post-installation instructions
 print_instructions() {
     echo ""
     echo "========================================"
     echo "USB Sentinel Installation Complete!"
     echo "========================================"
     echo ""
-    echo "Configuration files:"
-    echo "  - $CONFIG_DIR/sentinel.yaml"
-    echo "  - $CONFIG_DIR/policy.yaml"
+    echo "Configuration:"
+    echo "  $CONFIG_DIR/sentinel.yaml   daemon settings"
+    echo "  $CONFIG_DIR/policy.yaml     device rules"
+    echo "  $CONFIG_DIR/environment     ANTHROPIC_API_KEY (optional)"
     echo ""
     echo "Next steps:"
     echo ""
-    echo "1. Configure your Anthropic API key:"
-    echo "   export ANTHROPIC_API_KEY='your-key-here'"
-    echo "   Or add to $CONFIG_DIR/sentinel.yaml"
+    echo "1. Preview what the daemon would do with the devices attached now:"
+    echo "   sudo usb-sentinel scan"
     echo ""
-    echo "2. Review and customize the policy:"
-    echo "   nano $CONFIG_DIR/policy.yaml"
+    echo "2. Start the daemon and enable it at boot:"
+    echo "   sudo systemctl enable --now usb-sentinel"
     echo ""
-    echo "3. Start the daemon:"
-    echo "   sudo systemctl start usb-sentinel"
+    echo "   Devices attached when it starts keep working. New devices stay"
+    echo "   unbound until they are evaluated."
     echo ""
-    echo "4. Enable on boot:"
-    echo "   sudo systemctl enable usb-sentinel"
-    echo ""
-    echo "5. Check status:"
-    echo "   usb-sentinel status"
-    echo "   sudo systemctl status usb-sentinel"
-    echo ""
-    echo "Documentation: https://github.com/usb-sentinel/docs"
+    echo "3. Watch decisions, and allow a held device:"
+    echo "   journalctl -u usb-sentinel -f"
+    echo "   sudo usb-sentinel devices list --trust review"
+    echo "   sudo usb-sentinel devices trust <fingerprint> trusted"
     echo ""
 }
 
-# Uninstall function
 uninstall() {
     log_info "Uninstalling USB Sentinel..."
 
-    # Stop and disable service
-    if systemctl is-active usb-sentinel &> /dev/null; then
-        systemctl stop usb-sentinel
-    fi
-    if systemctl is-enabled usb-sentinel &> /dev/null; then
-        systemctl disable usb-sentinel
+    if command -v systemctl &> /dev/null; then
+        systemctl disable --now usb-sentinel 2> /dev/null || true
+        rm -f "$SYSTEMD_DIR/usb-sentinel.service"
+        systemctl daemon-reload
     fi
 
-    # Remove systemd service
-    rm -f "$SYSTEMD_DIR/usb-sentinel.service"
-    systemctl daemon-reload
-
-    # Remove udev rules
-    rm -f "$UDEV_DIR/99-usb-sentinel.rules"
-    udevadm control --reload-rules 2>/dev/null || true
-
-    # Remove installation directory
+    remove_legacy_hook
+    rm -f "$BIN_DIR/usb-sentinel" "$BIN_DIR/sentinel-daemon"
     rm -rf "$INSTALL_PREFIX"
-
-    # Uninstall Python package
-    pip3 uninstall -y usb-sentinel 2>/dev/null || true
 
     log_info "USB Sentinel uninstalled"
     log_warn "Configuration and data files were not removed:"
@@ -263,14 +200,12 @@ uninstall() {
     echo "  sudo rm -rf $CONFIG_DIR $DATA_DIR"
 }
 
-# Main installation
 main() {
     echo "========================================"
     echo "USB Sentinel Installer"
     echo "========================================"
     echo ""
 
-    # Parse arguments
     case "${1:-}" in
         --uninstall)
             check_root
@@ -288,21 +223,19 @@ main() {
             echo "  INSTALL_PREFIX  Installation prefix (default: /opt/usb-sentinel)"
             echo "  CONFIG_DIR      Configuration directory (default: /etc/usb-sentinel)"
             echo "  DATA_DIR        Data directory (default: /var/lib/usb-sentinel)"
+            echo "  BIN_DIR         Command symlinks (default: /usr/local/bin)"
             exit 0
             ;;
     esac
 
-    # Run installation steps
     check_root
     check_dependencies
     create_directories
     install_package
     install_config
-    install_udev
+    remove_legacy_hook
     install_systemd
-    initialize_database
     print_instructions
 }
 
-# Run main
 main "$@"

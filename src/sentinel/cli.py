@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import signal
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -22,10 +24,16 @@ from typing import Any
 
 from sentinel import __version__
 from sentinel.audit.database import AuditDatabase
-from sentinel.config import load_config
+from sentinel.config import SentinelConfig, load_config
 from sentinel.interceptor.descriptors import DeviceDescriptor
 from sentinel.policy.engine import PolicyEngine
-from sentinel.policy.parser import load_policy
+from sentinel.policy.fingerprint import generate_fingerprint
+from sentinel.policy.parser import (
+    PolicyParseError,
+    load_policy,
+    parse_usb_class,
+    validate_policy,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -92,7 +100,10 @@ def main(argv: list[str] | None = None) -> int:
     show_parser = devices_sub.add_parser("show", help="Show device details")
     show_parser.add_argument("fingerprint", help="Device fingerprint")
 
-    trust_parser = devices_sub.add_parser("trust", help="Set device trust level")
+    trust_parser = devices_sub.add_parser(
+        "trust",
+        help="Set device trust level (trusted/blocked also apply to it if attached)",
+    )
     trust_parser.add_argument("fingerprint", help="Device fingerprint")
     trust_parser.add_argument(
         "level",
@@ -119,8 +130,8 @@ def main(argv: list[str] | None = None) -> int:
     events_parser.add_argument(
         "-t",
         "--type",
-        choices=["connect", "disconnect", "allowed", "blocked"],
-        help="Filter by event type",
+        choices=["connect", "disconnect", "allowed", "blocked", "reviewed"],
+        help="Filter by event type (reviewed = held for review)",
     )
     events_parser.add_argument(
         "--since",
@@ -134,12 +145,28 @@ def main(argv: list[str] | None = None) -> int:
 
     policy_sub.add_parser("show", help="Show current policy")
     policy_sub.add_parser("validate", help="Validate policy file")
-    policy_sub.add_parser("reload", help="Reload policy from file")
+    policy_sub.add_parser("reload", help="Tell the running daemon to reload the policy")
 
     test_parser = policy_sub.add_parser("test", help="Test policy against device")
     test_parser.add_argument("vid", help="Vendor ID (4 hex chars)")
     test_parser.add_argument("pid", help="Product ID (4 hex chars)")
-    test_parser.add_argument("--class", dest="device_class", type=int, default=0)
+    test_parser.add_argument(
+        "--class", dest="device_class", default="0", help="Device class (name or number)"
+    )
+    test_parser.add_argument("--manufacturer", help="Manufacturer string")
+    test_parser.add_argument("--product", help="Product string")
+
+    # scan command
+    scan_parser = subparsers.add_parser(
+        "scan",
+        help="Show what the daemon would decide for each attached device (changes nothing)",
+    )
+    scan_parser.add_argument(
+        "--llm",
+        action="store_true",
+        help="Include LLM analysis (one API call per device)",
+    )
+    scan_parser.set_defaults(func=cmd_scan)
 
     policy_parser.set_defaults(func=cmd_policy)
 
@@ -199,6 +226,38 @@ def get_db(args: argparse.Namespace) -> AuditDatabase:
     return AuditDatabase(str(db_path))
 
 
+def daemon_pid(config: SentinelConfig) -> int | None:
+    """PID of the running daemon, from its PID file, or None."""
+    try:
+        pid = int(Path(config.daemon.pid_file).read_text().strip())
+    except (OSError, ValueError):
+        return None
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return None
+    except PermissionError:
+        pass
+    return pid
+
+
+def apply_to_attached(fingerprint: str, authorized: bool) -> list[str]:
+    """(De)authorize attached devices with this fingerprint. Returns their sysfs names."""
+    from sentinel.interceptor import sysfs
+
+    applied = []
+    for path in sysfs.iter_devices():
+        try:
+            descriptor = sysfs.read_device(path)
+        except sysfs.SysfsReadError:
+            continue
+        if generate_fingerprint(descriptor) == fingerprint and sysfs.set_authorized(
+            path, authorized
+        ):
+            applied.append(path.name)
+    return applied
+
+
 def output(data: Any, args: argparse.Namespace) -> None:
     """Output data in requested format."""
     if getattr(args, "json", False):
@@ -233,52 +292,33 @@ def cmd_start(args: argparse.Namespace) -> int:
 
 def cmd_stop(args: argparse.Namespace) -> int:
     """Stop the daemon."""
-    import os
-    import signal
-
     config = load_config(args.config)
-    pid_file = Path(config.daemon.pid_file)
-
-    if not pid_file.exists():
-        print("Daemon is not running (no PID file)")
+    pid = daemon_pid(config)
+    if pid is None:
+        print("Daemon is not running")
         return 1
 
     try:
-        pid = int(pid_file.read_text().strip())
         os.kill(pid, signal.SIGTERM)
-        print(f"Sent SIGTERM to daemon (PID {pid})")
-        return 0
-    except ProcessLookupError:
-        print("Daemon process not found, removing stale PID file")
-        pid_file.unlink()
-        return 1
-    except Exception as e:
+    except OSError as e:
         print(f"Error stopping daemon: {e}")
         return 1
+    print(f"Sent SIGTERM to daemon (PID {pid})")
+    return 0
 
 
 def cmd_status(args: argparse.Namespace) -> int:
     """Show daemon status."""
-    import os
-
     config = load_config(args.config)
-    pid_file = Path(config.daemon.pid_file)
-
-    daemon_running = False
-    daemon_pid = None
-
-    if pid_file.exists():
-        try:
-            daemon_pid = int(pid_file.read_text().strip())
-            os.kill(daemon_pid, 0)  # Check if process exists
-            daemon_running = True
-        except (ProcessLookupError, ValueError):
-            pass
+    pid = daemon_pid(config)
+    daemon_running = pid is not None
 
     # Get database stats
+    held = 0
     try:
         db = get_db(args)
         stats = db.get_system_statistics()
+        held = db.count_devices(trust_level="review")
         db.close()
     except Exception:
         stats = {}
@@ -286,13 +326,14 @@ def cmd_status(args: argparse.Namespace) -> int:
     status_data = {
         "version": __version__,
         "daemon_running": daemon_running,
-        "daemon_pid": daemon_pid,
+        "daemon_pid": pid,
         "config_file": args.config or "default",
         "database": config.database.path,
         "policy_file": config.policy.rules_file,
         "total_devices": stats.get("total_devices", 0),
         "total_events": stats.get("total_events", 0),
         "blocked_today": stats.get("blocked_today", 0),
+        "held_for_review": held,
     }
 
     if getattr(args, "json", False):
@@ -302,8 +343,8 @@ def cmd_status(args: argparse.Namespace) -> int:
         print("=" * 50)
         print(f"Version:        {status_data['version']}")
         print(f"Daemon:         {'Running' if daemon_running else 'Stopped'}")
-        if daemon_pid:
-            print(f"PID:            {daemon_pid}")
+        if pid:
+            print(f"PID:            {pid}")
         print(f"Config:         {status_data['config_file']}")
         print(f"Database:       {status_data['database']}")
         print(f"Policy:         {status_data['policy_file']}")
@@ -312,6 +353,11 @@ def cmd_status(args: argparse.Namespace) -> int:
         print(f"  Total Devices:  {status_data['total_devices']}")
         print(f"  Total Events:   {status_data['total_events']}")
         print(f"  Blocked Today:  {status_data['blocked_today']}")
+        print(f"  Held (review):  {held}")
+        if held:
+            print()
+            print("Held devices: usb-sentinel devices list --trust review")
+            print("Allow one:    usb-sentinel devices trust <fingerprint> trusted")
 
     return 0
 
@@ -375,6 +421,15 @@ def cmd_devices(args: argparse.Namespace) -> int:
 
             db.update_trust_level(args.fingerprint, args.level)
             print(f"Trust level updated: {args.fingerprint} -> {args.level}")
+
+            if args.level in ("trusted", "blocked"):
+                allow = args.level == "trusted"
+                applied = apply_to_attached(args.fingerprint, allow)
+                if applied:
+                    verb = "Authorized" if allow else "Deauthorized"
+                    print(f"{verb} attached device: {', '.join(applied)}")
+                else:
+                    print("Applies the next time the device is plugged in.")
 
         return 0
 
@@ -458,12 +513,7 @@ def cmd_policy(args: argparse.Namespace) -> int:
             policy = load_policy(policy_path)
             print(f"Policy valid: {len(policy.rules)} rules loaded")
 
-            # Check for warnings
-            warnings = []
-            for i, rule in enumerate(policy.rules[:-1]):
-                if rule.match.is_wildcard():
-                    warnings.append(f"Rule {i + 1}: Wildcard not at end - later rules unreachable")
-
+            warnings = validate_policy(policy)
             if warnings:
                 print("\nWarnings:")
                 for w in warnings:
@@ -475,8 +525,17 @@ def cmd_policy(args: argparse.Namespace) -> int:
             return 1
 
     elif args.policy_cmd == "reload":
-        print("Policy reload requires daemon to be running.")
-        print("The daemon will auto-reload if hot_reload is enabled.")
+        try:
+            policy = load_policy(policy_path)
+        except Exception as e:
+            print(f"Not reloading, policy is invalid: {e}")
+            return 1
+        pid = daemon_pid(config)
+        if pid is None:
+            print("Daemon is not running")
+            return 1
+        os.kill(pid, signal.SIGHUP)
+        print(f"Asked daemon (PID {pid}) to reload {len(policy.rules)} rules from {policy_path}")
         return 0
 
     elif args.policy_cmd == "test":
@@ -487,13 +546,20 @@ def cmd_policy(args: argparse.Namespace) -> int:
         policy = load_policy(policy_path)
         engine = PolicyEngine(policy=policy)
 
-        # Create test descriptor
+        try:
+            device_class = parse_usb_class(args.device_class)
+        except PolicyParseError as e:
+            print(e)
+            return 1
+
         descriptor = DeviceDescriptor(
-            vid=args.vid,
-            pid=args.pid,
-            device_class=args.device_class,
+            vid=args.vid.lower(),
+            pid=args.pid.lower(),
+            device_class=device_class,
             device_subclass=0,
             device_protocol=0,
+            manufacturer=args.manufacturer,
+            product=args.product,
             serial=None,
             interfaces=[],
         )
@@ -520,6 +586,71 @@ def cmd_policy(args: argparse.Namespace) -> int:
     else:
         print("Usage: usb-sentinel policy {show|validate|reload|test}")
 
+    return 0
+
+
+def cmd_scan(args: argparse.Namespace) -> int:
+    """Show the daemon's decision for every attached device, without enforcing it."""
+    import asyncio
+
+    from sentinel.daemon import SentinelDaemon
+    from sentinel.interceptor import sysfs
+
+    config = load_config(args.config)
+    paths = list(sysfs.iter_devices())
+    if not paths:
+        print(f"No USB devices found under {sysfs.SYSFS_USB_DEVICES}")
+        return 1
+
+    config.daemon.log_level = "warning"
+    if not args.llm:
+        config.analyzer.enabled = False
+    daemon = SentinelDaemon(config)
+
+    async def evaluate_all() -> list[dict[str, Any]]:
+        rows = []
+        for path in paths:
+            try:
+                descriptor = sysfs.read_device(path)
+            except sysfs.SysfsReadError as e:
+                rows.append({"port": path.name, "error": str(e)})
+                continue
+            decision = await daemon.evaluate(descriptor)
+            rows.append(
+                {
+                    "port": path.name,
+                    "vid_pid": descriptor.vid_pid,
+                    "product": descriptor.display_name,
+                    "authorized_now": sysfs.is_authorized(path),
+                    **decision.to_result(),
+                }
+            )
+        return rows
+
+    try:
+        rows = asyncio.run(evaluate_all())
+    except OSError as e:
+        print(f"Cannot read the audit database ({e}); run as root?")
+        return 1
+
+    if getattr(args, "json", False):
+        output(rows, args)
+        return 0
+
+    print(f"{'Port':<10} {'VID:PID':<10} {'Product':<28} {'Now':<5} {'Verdict':<8} Reason")
+    print("-" * 100)
+    for row in rows:
+        if "error" in row:
+            print(f"{row['port']:<10} unreadable: {row['error']}")
+            continue
+        now = {True: "on", False: "off", None: "?"}[row["authorized_now"]]
+        print(
+            f"{row['port']:<10} {row['vid_pid']:<10} {row['product'][:28]:<28} {now:<5} "
+            f"{row['action']:<8} {row['reason']}"
+        )
+    print()
+    print("Nothing was changed. The daemon leaves devices attached at startup alone;")
+    print("this is what it would decide if each were plugged in now.")
     return 0
 
 

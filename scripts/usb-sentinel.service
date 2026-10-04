@@ -1,14 +1,15 @@
 [Unit]
 Description=USB Sentinel - LLM-integrated USB Firewall
-Documentation=https://github.com/usb-sentinel/docs
-After=network.target local-fs.target
+Documentation=https://github.com/kase1111-hash/USB-Sentinel
+After=local-fs.target network.target
 Wants=network.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 -m sentinel.daemon -c /etc/usb-sentinel/sentinel.yaml -f
+ExecStart=/opt/usb-sentinel/venv/bin/sentinel-daemon -c /etc/usb-sentinel/sentinel.yaml
 ExecReload=/bin/kill -HUP $MAINPID
-ExecStop=/bin/kill -TERM $MAINPID
 
 # Security hardening
 User=root
@@ -17,25 +18,28 @@ NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
-ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
+# Not ProtectKernelTunables: it makes /sys read-only, and the daemon
+# enforces verdicts by writing /sys/bus/usb/devices/*/authorized and
+# authorized_default.
 
-# Allow access to USB devices and sysfs
+# Writable state: database, log file, PID file (/run/usb-sentinel)
 ReadWritePaths=/var/lib/usb-sentinel
 ReadWritePaths=/var/log
 ReadOnlyPaths=/etc/usb-sentinel
+RuntimeDirectory=usb-sentinel
 PrivateDevices=no
 
-# Environment
+# Environment (put ANTHROPIC_API_KEY=... here to enable LLM analysis)
 Environment=PYTHONUNBUFFERED=1
 EnvironmentFile=-/etc/usb-sentinel/environment
 
-# Restart policy
+# Restart policy. If the daemon crashes, new USB devices stay unauthorized
+# (fail closed) until it restarts and evaluates them. A clean stop
+# restores the kernel's default authorization.
 Restart=on-failure
-RestartSec=5
-StartLimitIntervalSec=60
-StartLimitBurst=3
+RestartSec=2
 
 # Logging
 StandardOutput=journal
