@@ -14,9 +14,9 @@ import hmac
 import logging
 import secrets
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
-from typing import Callable
+from datetime import datetime, timezone
 
 from fastapi import HTTPException, Request, Security, status
 from fastapi.security import APIKeyHeader, APIKeyQuery
@@ -323,9 +323,7 @@ class RateLimiter:
 
         # Remove buckets that haven't been used in 10 minutes
         cutoff = now - 600
-        self._buckets = {
-            k: v for k, v in self._buckets.items() if v.last_update > cutoff
-        }
+        self._buckets = {k: v for k, v in self._buckets.items() if v.last_update > cutoff}
         self._last_cleanup = now
 
 

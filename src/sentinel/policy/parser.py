@@ -2,6 +2,11 @@
 Policy file parser.
 
 Parses YAML policy files into Policy objects.
+
+Parsing is strict on purpose: a match condition is an AND of its keys, so a
+key the parser silently dropped (a typo, or a key it did not know about)
+would widen the rule until it matched every device. Unknown keys, empty
+matches and malformed values are therefore errors, not warnings.
 """
 
 from __future__ import annotations
@@ -13,6 +18,52 @@ from typing import Any
 import yaml
 
 from sentinel.policy.models import Action, MatchCondition, Policy, PolicyRule, USBClass
+
+# libyaml's parser is ~10x faster than the pure-Python one when available.
+_YAML_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+
+# `manufacturer: null` (and product/serial) in a policy means "the device
+# reports no such string". The matcher compares against "" for missing
+# strings, so this pattern matches missing, empty and whitespace-only values.
+MISSING_STRING_PATTERN = r"^\s*$"
+
+TRUST_LEVELS = ("trusted", "blocked", "unknown", "review")
+
+_HEX_ID_RE = re.compile(r"^[0-9a-fA-F]{4}$")
+_PATTERN_KEYS = ("manufacturer", "product", "serial")
+_BOOL_KEYS = (
+    "has_storage_endpoint",
+    "has_hid_endpoint",
+    "has_bulk_endpoint",
+    "is_composite",
+    "is_keyboard",
+    "is_mouse",
+    "first_seen",
+)
+_COUNT_KEYS = (
+    "endpoint_count_gt",
+    "endpoint_count_lt",
+    "interface_count_gt",
+    "interface_count_lt",
+)
+MATCH_KEYS = frozenset(
+    {
+        "vid",
+        "pid",
+        "vid_list",
+        "pid_list",
+        "vid_range",
+        "class",
+        "device_class",
+        "interface_class",
+        "class_list",
+        "trust_level",
+        *_PATTERN_KEYS,
+        *_BOOL_KEYS,
+        *_COUNT_KEYS,
+    }
+)
+RULE_KEYS = frozenset({"match", "action", "comment", "priority", "name"})
 
 
 class PolicyParseError(Exception):
@@ -40,7 +91,10 @@ def load_policy(path: str | Path) -> Policy:
         raise FileNotFoundError(f"Policy file not found: {path}")
 
     with open(path) as f:
-        data = yaml.safe_load(f)
+        try:
+            data = yaml.load(f, Loader=_YAML_LOADER)
+        except yaml.YAMLError as e:
+            raise PolicyParseError(f"Invalid YAML in {path}: {e}") from e
 
     if data is None:
         return Policy(rules=[])
@@ -89,6 +143,13 @@ def parse_rule(data: dict[str, Any]) -> PolicyRule:
     if not isinstance(data, dict):
         raise PolicyParseError("Rule must be a dictionary")
 
+    unknown = sorted(set(data) - RULE_KEYS)
+    if unknown:
+        raise PolicyParseError(
+            f"Unknown rule key(s): {', '.join(map(str, unknown))} "
+            f"(valid keys: {', '.join(sorted(RULE_KEYS))})"
+        )
+
     # Parse match condition
     match_data = data.get("match")
     if match_data is None:
@@ -102,18 +163,22 @@ def parse_rule(data: dict[str, Any]) -> PolicyRule:
         raise PolicyParseError("Rule must have 'action' field")
 
     try:
-        action = Action(action_str.lower())
+        action = Action(str(action_str).lower())
     except ValueError:
-        raise PolicyParseError(f"Invalid action: {action_str}")
+        raise PolicyParseError(
+            f"Invalid action: {action_str!r} (expected allow, block or review)"
+        ) from None
 
     # Parse optional fields
-    comment = data.get("comment", "")
+    comment = data.get("comment") or data.get("name") or ""
     priority = data.get("priority", 0)
+    if not isinstance(priority, int) or isinstance(priority, bool):
+        raise PolicyParseError(f"'priority' must be an integer, got {priority!r}")
 
     return PolicyRule(
         match=match,
         action=action,
-        comment=comment,
+        comment=str(comment),
         priority=priority,
     )
 
@@ -127,6 +192,9 @@ def parse_match_condition(data: Any) -> MatchCondition:
 
     Returns:
         MatchCondition object
+
+    Raises:
+        PolicyParseError: On unknown keys, empty conditions or invalid values
     """
     # Handle wildcard
     if data == "*":
@@ -135,30 +203,114 @@ def parse_match_condition(data: Any) -> MatchCondition:
     if not isinstance(data, dict):
         raise PolicyParseError("Match condition must be a dictionary or '*'")
 
-    # Parse class field (can be string name or int)
-    device_class = data.get("class")
-    if isinstance(device_class, str):
-        class_code = USBClass.from_name(device_class)
-        if class_code is None:
-            # Try parsing as hex
-            try:
-                class_code = int(device_class, 16) if device_class.startswith("0x") else int(device_class)
-            except ValueError:
-                raise PolicyParseError(f"Unknown device class: {device_class}")
-        device_class = class_code
+    if not data:
+        raise PolicyParseError("Empty match condition; use match: '*' to match every device")
 
-    return MatchCondition(
-        vid=data.get("vid"),
-        pid=data.get("pid"),
-        device_class=device_class,
-        manufacturer=data.get("manufacturer"),
-        product=data.get("product"),
-        serial=data.get("serial"),
-        has_storage_endpoint=data.get("has_storage_endpoint"),
-        has_hid_endpoint=data.get("has_hid_endpoint"),
-        endpoint_count_gt=data.get("endpoint_count_gt"),
-        first_seen=data.get("first_seen"),
-    )
+    unknown = sorted(set(data) - MATCH_KEYS)
+    if unknown:
+        raise PolicyParseError(
+            f"Unknown match key(s): {', '.join(map(str, unknown))} "
+            f"(valid keys: {', '.join(sorted(MATCH_KEYS))})"
+        )
+
+    if "class" in data and "device_class" in data:
+        raise PolicyParseError("Use either 'class' or 'device_class', not both")
+
+    kwargs: dict[str, Any] = {}
+    for key, value in data.items():
+        if key in ("vid", "pid"):
+            kwargs[key] = _parse_hex_id(key, value)
+        elif key in ("vid_list", "pid_list"):
+            kwargs[key] = [_parse_hex_id(key, v) for v in _require_list(key, value)]
+        elif key == "vid_range":
+            bounds = _require_list(key, value)
+            if len(bounds) != 2:
+                raise PolicyParseError("'vid_range' must be a list of two VIDs [min, max]")
+            kwargs[key] = (_parse_hex_id(key, bounds[0]), _parse_hex_id(key, bounds[1]))
+        elif key in ("class", "device_class"):
+            kwargs["device_class"] = parse_usb_class(value)
+        elif key == "interface_class":
+            kwargs[key] = parse_usb_class(value)
+        elif key == "class_list":
+            kwargs[key] = [parse_usb_class(v) for v in _require_list(key, value)]
+        elif key in _PATTERN_KEYS:
+            kwargs[key] = _parse_pattern(key, value)
+        elif key in _BOOL_KEYS:
+            if not isinstance(value, bool):
+                raise PolicyParseError(f"'{key}' must be true or false, got {value!r}")
+            kwargs[key] = value
+        elif key in _COUNT_KEYS:
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                raise PolicyParseError(f"'{key}' must be a non-negative integer, got {value!r}")
+            kwargs[key] = value
+        elif key == "trust_level":
+            if value not in TRUST_LEVELS:
+                raise PolicyParseError(
+                    f"'trust_level' must be one of {', '.join(TRUST_LEVELS)}, got {value!r}"
+                )
+            kwargs[key] = value
+
+    return MatchCondition(**kwargs)
+
+
+def parse_usb_class(value: Any) -> int:
+    """
+    Parse a USB class given as a name ('HID'), number (3) or hex string ('0x03').
+
+    Raises:
+        PolicyParseError: If the value is not a known class name or a code 0x00-0xFF
+    """
+    if isinstance(value, bool):
+        raise PolicyParseError(f"Invalid USB class: {value!r}")
+    if isinstance(value, int):
+        code = value
+    elif isinstance(value, str):
+        named = USBClass.from_name(value)
+        if named is not None:
+            return named
+        try:
+            code = int(value, 16) if value.lower().startswith("0x") else int(value)
+        except ValueError:
+            raise PolicyParseError(f"Unknown USB class: {value!r}") from None
+    else:
+        raise PolicyParseError(f"Invalid USB class: {value!r}")
+
+    if not 0x00 <= code <= 0xFF:
+        raise PolicyParseError(f"USB class out of range (0x00-0xFF): {value!r}")
+    return code
+
+
+def _parse_hex_id(key: str, value: Any) -> str:
+    """Validate a 4-digit hex VID/PID string and normalize it to lowercase."""
+    if isinstance(value, int) and not isinstance(value, bool):
+        # YAML reads unquoted 1234 as decimal and 0400 as octal, so the
+        # intended hex value cannot be recovered reliably.
+        raise PolicyParseError(
+            f"'{key}' must be a quoted 4-digit hex string such as '046d' "
+            f"(YAML read the unquoted value as the number {value})"
+        )
+    if not isinstance(value, str) or not _HEX_ID_RE.match(value):
+        raise PolicyParseError(f"'{key}' must be a 4-digit hex string, got {value!r}")
+    return value.lower()
+
+
+def _parse_pattern(key: str, value: Any) -> str:
+    """Validate a regex string field; null means 'string is missing'."""
+    if value is None:
+        return MISSING_STRING_PATTERN
+    if not isinstance(value, str):
+        raise PolicyParseError(f"'{key}' must be a regex string or null, got {value!r}")
+    try:
+        re.compile(value)
+    except re.error as e:
+        raise PolicyParseError(f"Invalid regex in '{key}': {e}") from e
+    return value
+
+
+def _require_list(key: str, value: Any) -> list[Any]:
+    if not isinstance(value, list) or not value:
+        raise PolicyParseError(f"'{key}' must be a non-empty list")
+    return value
 
 
 def validate_policy(policy: Policy) -> list[str]:
@@ -182,9 +334,7 @@ def validate_policy(policy: Policy) -> list[str]:
     for i, rule in enumerate(policy.rules):
         key = (rule.match.vid, rule.match.pid)
         if key != (None, None) and key in vid_pid_rules:
-            errors.append(
-                f"Warning: Rule {i} has same VID:PID as rule {vid_pid_rules[key]}"
-            )
+            errors.append(f"Warning: Rule {i} has same VID:PID as rule {vid_pid_rules[key]}")
         vid_pid_rules[key] = i
 
     # Check regex patterns are valid

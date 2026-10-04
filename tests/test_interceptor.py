@@ -4,8 +4,6 @@ Tests for USB Interceptor module.
 
 from __future__ import annotations
 
-import asyncio
-from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -42,10 +40,7 @@ class TestDeviceDescriptor:
                 interface_subclass=intf["interface_subclass"],
                 interface_protocol=intf["interface_protocol"],
                 num_endpoints=intf["num_endpoints"],
-                endpoints=[
-                    EndpointDescriptor(**ep)
-                    for ep in intf.get("endpoints", [])
-                ],
+                endpoints=[EndpointDescriptor(**ep) for ep in intf.get("endpoints", [])],
             )
             for intf in sample_device_descriptor["interfaces"]
         ]
@@ -363,7 +358,7 @@ class TestUSBEnumerator:
         with patch("usb.core.find") as mock_find:
             mock_find.side_effect = Exception("No backend available")
 
-            with pytest.raises(Exception):
+            with pytest.raises(Exception, match="No backend available"):
                 enumerator.enumerate_all()
 
     def test_enumerate_all_empty(self) -> None:
@@ -383,9 +378,7 @@ class TestDeviceAuthorizer:
         """Test getting path for non-existent device."""
         authorizer = DeviceAuthorizer()
 
-        with patch.object(
-            DeviceAuthorizer, "SYSFS_USB_PATH", temp_dir
-        ):
+        with patch.object(DeviceAuthorizer, "SYSFS_USB_PATH", temp_dir):
             path = authorizer._get_device_path(99, 99)
             assert path is None
 
@@ -428,3 +421,54 @@ class TestUSBInterceptor:
         interceptor = USBInterceptor()
         interceptor.stop()
         assert interceptor.monitor._running is False
+
+
+class TestValidatorFalsePositives:
+    """Everyday hardware the daemon would otherwise hold for review."""
+
+    def test_generic_product_name_from_matching_vendor(self) -> None:
+        from sentinel.interceptor.descriptors import create_test_descriptor
+        from sentinel.interceptor.validator import validate_descriptor
+
+        k120 = create_test_descriptor(
+            vid="046d", pid="c31c", manufacturer="Logitech", product="USB Keyboard"
+        )
+        assert not validate_descriptor(k120).has_anomalies
+
+        spoofed = create_test_descriptor(
+            vid="046d", pid="c31c", manufacturer="SIGMACHIP", product="USB Keyboard"
+        )
+        assert validate_descriptor(spoofed).has_anomalies
+
+        unknown_vendor = create_test_descriptor(
+            vid="1c4f", pid="0002", manufacturer="SIGMACHIP", product="USB Keyboard"
+        )
+        assert validate_descriptor(unknown_vendor).has_anomalies
+
+    def test_iad_webcam_with_zero_bandwidth_alt_setting(self) -> None:
+        from sentinel.interceptor.descriptors import (
+            DeviceDescriptor,
+            EndpointDescriptor,
+            InterfaceDescriptor,
+        )
+        from sentinel.interceptor.validator import validate_descriptor
+
+        iso = EndpointDescriptor(address=0x82, attributes=0x05, max_packet_size=3072, interval=1)
+        intr = EndpointDescriptor(address=0x83, attributes=0x03, max_packet_size=16, interval=6)
+        webcam = DeviceDescriptor(
+            vid="0c45",
+            pid="6366",
+            device_class=0xEF,
+            device_subclass=2,
+            device_protocol=1,
+            manufacturer="Sonix",
+            product="USB 2.0 Camera",
+            serial=None,
+            interfaces=[
+                InterfaceDescriptor(0x0E, 1, 0, 1, [intr], 0, 0),
+                InterfaceDescriptor(0x0E, 2, 0, 0, [], 1, 0),
+                InterfaceDescriptor(0x0E, 2, 0, 1, [iso], 1, 1),
+                InterfaceDescriptor(0x01, 1, 0, 0, [], 2, 0),
+            ],
+        )
+        assert validate_descriptor(webcam).anomalies == []

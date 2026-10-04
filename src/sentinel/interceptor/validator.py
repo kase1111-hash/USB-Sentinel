@@ -12,8 +12,10 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING
 
+from sentinel.interceptor.constants import TRUSTED_VENDORS
+
 if TYPE_CHECKING:
-    from sentinel.interceptor.descriptors import DeviceDescriptor, InterfaceDescriptor
+    from sentinel.interceptor.descriptors import DeviceDescriptor
 
 
 class AnomalyType(Enum):
@@ -187,13 +189,13 @@ KNOWN_ATTACK_SIGNATURES = {
 
 # Valid class/endpoint combinations
 EXPECTED_ENDPOINTS = {
-    0x01: (1, 4),   # Audio: 1-4 endpoints
-    0x02: (1, 4),   # CDC: 1-4 endpoints
-    0x03: (1, 2),   # HID: 1-2 endpoints
-    0x07: (1, 3),   # Printer: 1-3 endpoints
-    0x08: (2, 4),   # Mass Storage: 2-4 endpoints
-    0x09: (1, 1),   # Hub: 1 endpoint
-    0x0E: (1, 4),   # Video: 1-4 endpoints
+    0x01: (1, 4),  # Audio: 1-4 endpoints
+    0x02: (1, 4),  # CDC: 1-4 endpoints
+    0x03: (1, 2),  # HID: 1-2 endpoints
+    0x07: (1, 3),  # Printer: 1-3 endpoints
+    0x08: (2, 4),  # Mass Storage: 2-4 endpoints
+    0x09: (1, 1),  # Hub: 1 endpoint
+    0x0E: (1, 4),  # Video: 1-4 endpoints
 }
 
 
@@ -203,9 +205,7 @@ class DescriptorValidator:
     """
 
     def __init__(self) -> None:
-        self._suspicious_patterns = [
-            re.compile(p) for p in SUSPICIOUS_PATTERNS
-        ]
+        self._suspicious_patterns = [re.compile(p) for p in SUSPICIOUS_PATTERNS]
 
     def validate(self, descriptor: DeviceDescriptor) -> ValidationResult:
         """
@@ -238,13 +238,15 @@ class DescriptorValidator:
         vid_pid = (descriptor.vid.lower(), descriptor.pid.lower())
 
         if vid_pid in KNOWN_ATTACK_SIGNATURES:
-            result.add_anomaly(Anomaly(
-                anomaly_type=AnomalyType.ATTACK_SIGNATURE,
-                severity=Severity.CRITICAL,
-                description="Device matches known attack hardware signature",
-                field="vid:pid",
-                actual=f"{descriptor.vid}:{descriptor.pid}",
-            ))
+            result.add_anomaly(
+                Anomaly(
+                    anomaly_type=AnomalyType.ATTACK_SIGNATURE,
+                    severity=Severity.CRITICAL,
+                    description="Device matches known attack hardware signature",
+                    field="vid:pid",
+                    actual=f"{descriptor.vid}:{descriptor.pid}",
+                )
+            )
 
     def _check_class_consistency(
         self,
@@ -257,36 +259,47 @@ class DescriptorValidator:
         # Check for multiple high-risk classes
         high_risk_present = interface_classes & HIGH_RISK_CLASSES
         if len(high_risk_present) > 1:
-            result.add_anomaly(Anomaly(
-                anomaly_type=AnomalyType.MULTIPLE_HIGH_RISK_CLASSES,
-                severity=Severity.HIGH,
-                description="Device has multiple high-risk interface classes",
-                field="interface_classes",
-                actual=str(list(high_risk_present)),
-            ))
+            result.add_anomaly(
+                Anomaly(
+                    anomaly_type=AnomalyType.MULTIPLE_HIGH_RISK_CLASSES,
+                    severity=Severity.HIGH,
+                    description="Device has multiple high-risk interface classes",
+                    field="interface_classes",
+                    actual=str(list(high_risk_present)),
+                )
+            )
 
         # HID + Storage is highly suspicious
         if 0x03 in interface_classes and 0x08 in interface_classes:
-            result.add_anomaly(Anomaly(
-                anomaly_type=AnomalyType.SUSPICIOUS_CLASS_COMBO,
-                severity=Severity.CRITICAL,
-                description="HID device with mass storage capability - likely attack device",
-                field="interface_classes",
-                actual="HID (0x03) + Mass Storage (0x08)",
-            ))
+            result.add_anomaly(
+                Anomaly(
+                    anomaly_type=AnomalyType.SUSPICIOUS_CLASS_COMBO,
+                    severity=Severity.CRITICAL,
+                    description="HID device with mass storage capability - likely attack device",
+                    field="interface_classes",
+                    actual="HID (0x03) + Mass Storage (0x08)",
+                )
+            )
 
         # Check device class vs interface class consistency
-        if descriptor.device_class != 0:
-            # Device class should match interface classes
-            if descriptor.device_class not in interface_classes:
-                result.add_anomaly(Anomaly(
+        # Device class should match interface classes. 0x00 defers to the
+        # interfaces and 0xEF (Miscellaneous / IAD) is the standard class for
+        # composite devices such as webcams, so neither is a mismatch.
+        if (
+            descriptor.device_class not in (0x00, 0xEF)
+            and descriptor.interfaces
+            and descriptor.device_class not in interface_classes
+        ):
+            result.add_anomaly(
+                Anomaly(
                     anomaly_type=AnomalyType.CLASS_MISMATCH,
                     severity=Severity.MEDIUM,
                     description="Device class doesn't match interface classes",
                     field="device_class",
                     expected=f"One of {list(interface_classes)}",
                     actual=str(descriptor.device_class),
-                ))
+                )
+            )
 
     def _check_string_anomalies(
         self,
@@ -296,35 +309,52 @@ class DescriptorValidator:
         """Check for string-related anomalies."""
         # Missing manufacturer
         if not descriptor.manufacturer:
-            result.add_anomaly(Anomaly(
-                anomaly_type=AnomalyType.MISSING_MANUFACTURER,
-                severity=Severity.MEDIUM,
-                description="Device has no manufacturer string",
-                field="manufacturer",
-            ))
+            result.add_anomaly(
+                Anomaly(
+                    anomaly_type=AnomalyType.MISSING_MANUFACTURER,
+                    severity=Severity.MEDIUM,
+                    description="Device has no manufacturer string",
+                    field="manufacturer",
+                )
+            )
 
         # Missing product
         if not descriptor.product:
-            result.add_anomaly(Anomaly(
-                anomaly_type=AnomalyType.MISSING_PRODUCT,
-                severity=Severity.LOW,
-                description="Device has no product string",
-                field="product",
-            ))
+            result.add_anomaly(
+                Anomaly(
+                    anomaly_type=AnomalyType.MISSING_PRODUCT,
+                    severity=Severity.LOW,
+                    description="Device has no product string",
+                    field="product",
+                )
+            )
 
-        # Generic strings
+        # Generic strings. Budget models from established vendors often have
+        # product names like "USB Keyboard" (e.g. Logitech K120), so a generic
+        # product name is only suspicious when the manufacturer string does
+        # not match the vendor registered for the VID.
+        vendor = TRUSTED_VENDORS.get(descriptor.vid.lower())
+        vendor_verified = bool(
+            vendor
+            and descriptor.manufacturer
+            and vendor.name.split()[0].lower() in descriptor.manufacturer.lower()
+        )
         for field_name, value in [
             ("manufacturer", descriptor.manufacturer),
             ("product", descriptor.product),
         ]:
+            if field_name == "product" and vendor_verified:
+                continue
             if value and value.lower().strip() in GENERIC_STRINGS:
-                result.add_anomaly(Anomaly(
-                    anomaly_type=AnomalyType.GENERIC_STRINGS,
-                    severity=Severity.MEDIUM,
-                    description=f"Device has generic {field_name} string",
-                    field=field_name,
-                    actual=value,
-                ))
+                result.add_anomaly(
+                    Anomaly(
+                        anomaly_type=AnomalyType.GENERIC_STRINGS,
+                        severity=Severity.MEDIUM,
+                        description=f"Device has generic {field_name} string",
+                        field=field_name,
+                        actual=value,
+                    )
+                )
 
         # Suspicious patterns
         for field_name, value in [
@@ -334,13 +364,15 @@ class DescriptorValidator:
             if value:
                 for pattern in self._suspicious_patterns:
                     if pattern.search(value):
-                        result.add_anomaly(Anomaly(
-                            anomaly_type=AnomalyType.SUSPICIOUS_STRINGS,
-                            severity=Severity.HIGH,
-                            description=f"Device {field_name} matches attack device pattern",
-                            field=field_name,
-                            actual=value,
-                        ))
+                        result.add_anomaly(
+                            Anomaly(
+                                anomaly_type=AnomalyType.SUSPICIOUS_STRINGS,
+                                severity=Severity.HIGH,
+                                description=f"Device {field_name} matches attack device pattern",
+                                field=field_name,
+                                actual=value,
+                            )
+                        )
                         break
 
     def _check_endpoint_consistency(
@@ -352,38 +384,47 @@ class DescriptorValidator:
         for intf in descriptor.interfaces:
             # Check declared vs actual endpoint count
             if intf.num_endpoints != len(intf.endpoints):
-                result.add_anomaly(Anomaly(
-                    anomaly_type=AnomalyType.ENDPOINT_COUNT_MISMATCH,
-                    severity=Severity.LOW,
-                    description="Declared endpoint count doesn't match actual",
-                    field="num_endpoints",
-                    expected=str(intf.num_endpoints),
-                    actual=str(len(intf.endpoints)),
-                ))
+                result.add_anomaly(
+                    Anomaly(
+                        anomaly_type=AnomalyType.ENDPOINT_COUNT_MISMATCH,
+                        severity=Severity.LOW,
+                        description="Declared endpoint count doesn't match actual",
+                        field="num_endpoints",
+                        expected=str(intf.num_endpoints),
+                        actual=str(len(intf.endpoints)),
+                    )
+                )
 
-            # Check expected endpoints for class
-            if intf.interface_class in EXPECTED_ENDPOINTS:
+            # Check expected endpoints for class. Zero endpoints is normal
+            # (audio control interfaces, zero-bandwidth alternate setting 0
+            # of audio/video streaming and CDC data), so only judge
+            # interfaces that declare some.
+            if intf.interface_class in EXPECTED_ENDPOINTS and intf.num_endpoints:
                 min_ep, max_ep = EXPECTED_ENDPOINTS[intf.interface_class]
                 if not (min_ep <= intf.num_endpoints <= max_ep):
-                    result.add_anomaly(Anomaly(
-                        anomaly_type=AnomalyType.UNUSUAL_ENDPOINT_CONFIG,
-                        severity=Severity.MEDIUM,
-                        description=f"Unusual endpoint count for class 0x{intf.interface_class:02X}",
-                        field="num_endpoints",
-                        expected=f"{min_ep}-{max_ep}",
-                        actual=str(intf.num_endpoints),
-                    ))
+                    result.add_anomaly(
+                        Anomaly(
+                            anomaly_type=AnomalyType.UNUSUAL_ENDPOINT_CONFIG,
+                            severity=Severity.MEDIUM,
+                            description=f"Unusual endpoint count for class 0x{intf.interface_class:02X}",
+                            field="num_endpoints",
+                            expected=f"{min_ep}-{max_ep}",
+                            actual=str(intf.num_endpoints),
+                        )
+                    )
 
         # Check for excessive total endpoints
         total_endpoints = sum(intf.num_endpoints for intf in descriptor.interfaces)
         if total_endpoints > 10:
-            result.add_anomaly(Anomaly(
-                anomaly_type=AnomalyType.EXCESSIVE_ENDPOINTS,
-                severity=Severity.MEDIUM,
-                description="Device has unusually many endpoints",
-                field="total_endpoints",
-                actual=str(total_endpoints),
-            ))
+            result.add_anomaly(
+                Anomaly(
+                    anomaly_type=AnomalyType.EXCESSIVE_ENDPOINTS,
+                    severity=Severity.MEDIUM,
+                    description="Device has unusually many endpoints",
+                    field="total_endpoints",
+                    actual=str(total_endpoints),
+                )
+            )
 
     def _check_attack_patterns(
         self,
@@ -392,15 +433,20 @@ class DescriptorValidator:
     ) -> None:
         """Check for known attack device patterns."""
         # Rubber Ducky pattern: HID with ATMEL vendor string
-        if any(intf.interface_class == 0x03 for intf in descriptor.interfaces):
-            if descriptor.manufacturer and "atmel" in descriptor.manufacturer.lower():
-                result.add_anomaly(Anomaly(
+        if (
+            descriptor.has_hid
+            and descriptor.manufacturer
+            and "atmel" in descriptor.manufacturer.lower()
+        ):
+            result.add_anomaly(
+                Anomaly(
                     anomaly_type=AnomalyType.RUBBER_DUCKY_PATTERN,
                     severity=Severity.CRITICAL,
                     description="Device matches Rubber Ducky pattern (HID + ATMEL)",
                     field="manufacturer",
                     actual=descriptor.manufacturer,
-                ))
+                )
+            )
 
         # BadUSB pattern: Multiple re-enumeration or class changes
         # (This would require tracking state across connections)
@@ -419,27 +465,31 @@ class DescriptorValidator:
                 if intf.interface_class == 0x03:
                     for ep in intf.endpoints:
                         if (ep.attributes & 0x03) == 0x02:  # Bulk transfer
-                            result.add_anomaly(Anomaly(
-                                anomaly_type=AnomalyType.UNUSUAL_ENDPOINT_CONFIG,
-                                severity=Severity.HIGH,
-                                description="HID device with bulk transfer endpoint",
-                                field="endpoint_type",
-                                expected="Interrupt (0x03)",
-                                actual="Bulk (0x02)",
-                            ))
+                            result.add_anomaly(
+                                Anomaly(
+                                    anomaly_type=AnomalyType.UNUSUAL_ENDPOINT_CONFIG,
+                                    severity=Severity.HIGH,
+                                    description="HID device with bulk transfer endpoint",
+                                    field="endpoint_type",
+                                    expected="Interrupt (0x03)",
+                                    actual="Bulk (0x02)",
+                                )
+                            )
 
         # CDC device claiming to be keyboard
         if 0x02 in interface_classes and 0x03 in interface_classes:
             # Check if HID is keyboard subclass
             for intf in descriptor.interfaces:
                 if intf.interface_class == 0x03 and intf.interface_protocol == 1:
-                    result.add_anomaly(Anomaly(
-                        anomaly_type=AnomalyType.SUSPICIOUS_CLASS_COMBO,
-                        severity=Severity.HIGH,
-                        description="CDC device with keyboard interface - possible attack device",
-                        field="interface_classes",
-                        actual="CDC + HID Keyboard",
-                    ))
+                    result.add_anomaly(
+                        Anomaly(
+                            anomaly_type=AnomalyType.SUSPICIOUS_CLASS_COMBO,
+                            severity=Severity.HIGH,
+                            description="CDC device with keyboard interface - possible attack device",
+                            field="interface_classes",
+                            actual="CDC + HID Keyboard",
+                        )
+                    )
 
 
 def validate_descriptor(descriptor: DeviceDescriptor) -> ValidationResult:

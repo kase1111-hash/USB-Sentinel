@@ -5,22 +5,21 @@ Tests for Audit Database module.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
 
-from sentinel.audit.database import AuditDatabase, create_database
+from sentinel.audit.database import AuditDatabase
 from sentinel.audit.models import EventType, TrustLevel
 from sentinel.audit.schemas import (
     DeviceCreate,
-    DeviceResponse,
     DeviceUpdate,
     EventCreate,
-    EventResponse,
-    TrustLevel as SchemaTrustLevel,
     device_to_response,
     event_to_response,
+)
+from sentinel.audit.schemas import (
+    TrustLevel as SchemaTrustLevel,
 )
 
 
@@ -344,6 +343,34 @@ class TestDatabaseIntegrity:
         result = test_db.verify_integrity(expected_hash=expected)
 
         assert result is True
+
+
+class TestAppendOnlyAuditLog:
+    """The events table must reject UPDATE and DELETE at the SQLite level."""
+
+    @pytest.mark.parametrize(
+        "statement",
+        ["DELETE FROM events", "UPDATE events SET verdict = 'allow'"],
+    )
+    def test_events_cannot_be_rewritten(self, test_db: AuditDatabase, statement: str) -> None:
+        import sqlite3
+
+        test_db.add_device(fingerprint="fp-audit", vid="046d", pid="c534")
+        test_db.log_event(device_fingerprint="fp-audit", event_type="blocked", verdict="block")
+
+        conn = sqlite3.connect(test_db.db_path)
+        try:
+            with pytest.raises(sqlite3.IntegrityError, match="not permitted"):
+                conn.execute(statement)
+        finally:
+            conn.close()
+
+        assert len(test_db.get_events(device_fingerprint="fp-audit")) == 1
+
+    def test_reopening_existing_database(self, test_db: AuditDatabase) -> None:
+        """Trigger creation is idempotent."""
+        reopened = AuditDatabase(test_db.db_path)
+        reopened.close()
 
 
 class TestPydanticSchemas:

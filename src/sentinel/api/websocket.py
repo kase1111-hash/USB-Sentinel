@@ -7,15 +7,16 @@ Provides live updates for USB device events to connected dashboard clients.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Callable
-from weakref import WeakSet
+from typing import Any
 
-from fastapi import WebSocket, WebSocketDisconnect, status
+from fastapi import WebSocket, WebSocketDisconnect
 
 from sentinel.api.auth import key_manager
 
@@ -85,13 +86,15 @@ class WebSocketMessage:
         )
 
     @classmethod
-    def from_json(cls, data: str) -> "WebSocketMessage":
+    def from_json(cls, data: str) -> WebSocketMessage:
         """Deserialize from JSON string."""
         parsed = json.loads(data)
         return cls(
             event_type=parsed.get("event", "unknown"),
             data=parsed.get("data", {}),
-            timestamp=datetime.fromisoformat(parsed.get("timestamp", datetime.now(timezone.utc).isoformat())),
+            timestamp=datetime.fromisoformat(
+                parsed.get("timestamp", datetime.now(timezone.utc).isoformat())
+            ),
             id=parsed.get("id", ""),
         )
 
@@ -186,25 +189,19 @@ class ConnectionManager:
 
         if self._broadcast_task:
             self._broadcast_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._broadcast_task
-            except asyncio.CancelledError:
-                pass
 
         if self._heartbeat_task:
             self._heartbeat_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._heartbeat_task
-            except asyncio.CancelledError:
-                pass
 
         # Close all connections
         async with self._lock:
             for conn in list(self._connections.values()):
-                try:
+                with contextlib.suppress(Exception):
                     await conn.websocket.close()
-                except Exception:
-                    pass
             self._connections.clear()
 
         logger.info("WebSocket connection manager stopped")
@@ -244,10 +241,8 @@ class ConnectionManager:
             # Remove old connection for same client
             if client_id in self._connections:
                 old_conn = self._connections[client_id]
-                try:
+                with contextlib.suppress(Exception):
                     await old_conn.websocket.close()
-                except Exception:
-                    pass
 
             self._connections[client_id] = conn
 

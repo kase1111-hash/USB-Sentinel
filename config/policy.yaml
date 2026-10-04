@@ -2,19 +2,28 @@
 # =========================
 #
 # Rules are evaluated top-to-bottom. First matching rule determines the action.
-# Actions: allow, block, review (escalate to LLM analyzer)
+# Actions: allow, block, review (escalate to the analyzer)
+#
+# All keys in a match must hold (AND). Unknown keys and empty matches are
+# rejected when the policy loads; use match: '*' to match every device.
+# Check a policy with:  usb-sentinel policy validate
 #
 # Match conditions:
-#   vid: Vendor ID (hex string, e.g., '046d')
-#   pid: Product ID (hex string, e.g., 'c534')
-#   class: Device or interface class (name or number)
-#   manufacturer: Manufacturer string (regex)
-#   product: Product string (regex)
-#   serial: Serial number (regex)
-#   has_storage_endpoint: Device has mass storage capability (bool)
-#   has_hid_endpoint: Device has HID capability (bool)
-#   endpoint_count_gt: More than N endpoints (int)
+#   vid, pid: Vendor / Product ID (quoted 4-digit hex string, e.g. '046d')
+#   vid_list, pid_list: Any of a list of IDs (e.g. ['046d', '045e'])
+#   vid_range: Inclusive VID range (e.g. ['2000', '2fff'])
+#   class: Device class or any interface class (name like 'HID', or number)
+#   interface_class: Some interface has this class
+#   class_list: Device or any interface has one of these classes
+#   manufacturer, product, serial: Regex (case-insensitive search);
+#       null matches devices that report no such string
+#   has_storage_endpoint, has_hid_endpoint, has_bulk_endpoint: bool
+#   is_composite, is_keyboard, is_mouse: bool
+#   endpoint_count_gt, endpoint_count_lt: Total endpoint count bounds (int)
+#   interface_count_gt, interface_count_lt: Interface count bounds (int)
 #   first_seen: Device has never been seen before (bool)
+#   trust_level: Trust level set with `usb-sentinel devices trust`
+#       (trusted, blocked, unknown, review)
 
 rules:
   # ===================

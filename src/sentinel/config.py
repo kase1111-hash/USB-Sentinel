@@ -13,7 +13,6 @@ from typing import Any
 
 import yaml
 
-
 # Default configuration paths
 DEFAULT_CONFIG_PATH = Path("/etc/usb-sentinel/sentinel.yaml")
 DEFAULT_POLICY_PATH = Path("/etc/usb-sentinel/policy.yaml")
@@ -25,7 +24,7 @@ class DaemonConfig:
     """Daemon general settings."""
 
     daemonize: bool = False
-    pid_file: str = "/var/run/usb-sentinel.pid"
+    pid_file: str = "/run/usb-sentinel/sentinel.pid"
     log_level: str = "info"
     log_file: str | None = "/var/log/usb-sentinel.log"
 
@@ -63,11 +62,14 @@ class AnalyzerConfig:
 
     enabled: bool = True
     provider: str = "anthropic"
-    model: str = "claude-sonnet-4-20250514"
+    model: str = "claude-sonnet-5-5"
     api_key: str | None = None
     max_tokens: int = 1024
     timeout: int = 30
     rate_limit: int = 60
+    # Optional output_config.effort (low..max). Leave unset for models
+    # that do not support it.
+    effort: str | None = None
     local: LocalLLMConfig = field(default_factory=LocalLLMConfig)
 
     def __post_init__(self) -> None:
@@ -113,7 +115,7 @@ class APIConfig:
 class AlertMethods:
     """Alert notification methods."""
 
-    desktop: bool = True
+    desktop: bool = False  # accepted for compatibility; not implemented
     syslog: bool = True
     webhook: str | None = None
 
@@ -123,7 +125,9 @@ class AlertConfig:
     """Alert settings."""
 
     enabled: bool = True
-    threshold: int = 75
+    # Alert on blocked/held devices whose risk score is at least this.
+    # Blocks by a policy rule or operator decision always alert.
+    threshold: int = 50
     methods: AlertMethods = field(default_factory=AlertMethods)
 
     def __post_init__(self) -> None:
@@ -146,16 +150,35 @@ class SentinelConfig:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SentinelConfig:
-        """Create configuration from dictionary."""
-        return cls(
-            daemon=DaemonConfig(**data.get("daemon", {})),
-            policy=PolicyConfig(**data.get("policy", {})),
-            database=DatabaseConfig(**data.get("database", {})),
-            analyzer=AnalyzerConfig(**data.get("analyzer", {})),
-            interceptor=InterceptorConfig(**data.get("interceptor", {})),
-            api=APIConfig(**data.get("api", {})),
-            alerts=AlertConfig(**data.get("alerts", {})),
-        )
+        """
+        Create configuration from dictionary.
+
+        Raises:
+            ValueError: On unknown sections or settings, naming the offender
+        """
+        sections: dict[str, type] = {
+            "daemon": DaemonConfig,
+            "policy": PolicyConfig,
+            "database": DatabaseConfig,
+            "analyzer": AnalyzerConfig,
+            "interceptor": InterceptorConfig,
+            "api": APIConfig,
+            "alerts": AlertConfig,
+        }
+        unknown = sorted(set(data) - set(sections))
+        if unknown:
+            raise ValueError(f"Unknown configuration section(s): {', '.join(unknown)}")
+
+        kwargs = {}
+        for name, section_cls in sections.items():
+            values = data.get(name) or {}
+            if not isinstance(values, dict):
+                raise ValueError(f"Configuration section '{name}' must be a mapping")
+            try:
+                kwargs[name] = section_cls(**values)
+            except TypeError as e:
+                raise ValueError(f"Invalid setting in '{name}': {e}") from e
+        return cls(**kwargs)
 
 
 def load_config(path: str | Path | None = None) -> SentinelConfig:
@@ -228,9 +251,16 @@ def validate_config(config: SentinelConfig) -> list[str]:
     if config.analyzer.provider not in valid_providers:
         errors.append(f"Invalid analyzer provider: {config.analyzer.provider}")
 
-    if config.analyzer.enabled and config.analyzer.provider == "anthropic":
-        if not config.analyzer.api_key:
-            errors.append("Anthropic API key required when analyzer is enabled")
+    # A missing API key is not an error: the daemon falls back to its local
+    # heuristic analyzer and says so at startup.
+    valid_efforts = {"low", "medium", "high", "xhigh", "max"}
+    if config.analyzer.effort is not None and config.analyzer.effort not in valid_efforts:
+        errors.append(f"Invalid analyzer effort: {config.analyzer.effort}")
+
+    if config.interceptor.analysis_timeout <= 0:
+        errors.append(
+            f"interceptor.analysis_timeout must be positive: {config.interceptor.analysis_timeout}"
+        )
 
     # --- Interceptor: validate bypass_classes ---
     for cls_code in config.interceptor.bypass_classes:
@@ -250,10 +280,7 @@ def validate_config(config: SentinelConfig) -> list[str]:
 
     for origin in config.api.cors_origins:
         if not origin.startswith(("http://", "https://")):
-            errors.append(
-                f"Invalid CORS origin: {origin!r} "
-                "(must start with http:// or https://)"
-            )
+            errors.append(f"Invalid CORS origin: {origin!r} (must start with http:// or https://)")
 
     # --- Alerts ---
     if not (0 <= config.alerts.threshold <= 100):
@@ -262,16 +289,11 @@ def validate_config(config: SentinelConfig) -> list[str]:
     if config.alerts.methods.webhook:
         url = config.alerts.methods.webhook
         if not url.startswith(("http://", "https://")):
-            errors.append(
-                f"Invalid webhook URL: {url!r} "
-                "(must start with http:// or https://)"
-            )
+            errors.append(f"Invalid webhook URL: {url!r} (must start with http:// or https://)")
 
     # --- Database: check parent directory is writable ---
     db_parent = Path(config.database.path).parent
     if db_parent.exists() and not os.access(db_parent, os.W_OK):
-        errors.append(
-            f"Database directory not writable: {db_parent}"
-        )
+        errors.append(f"Database directory not writable: {db_parent}")
 
     return errors

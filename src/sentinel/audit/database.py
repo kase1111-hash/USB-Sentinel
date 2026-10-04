@@ -10,26 +10,25 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
 import shutil
+from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Generator, Sequence
+from typing import Any
 
 from sqlalchemy import create_engine, event, func, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from sentinel.audit.models import (
-    APPEND_ONLY_TRIGGER,
+    APPEND_ONLY_TRIGGERS,
     Base,
     Device,
     Event,
     EventType,
     TrustLevel,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -96,16 +95,9 @@ class AuditDatabase:
         Base.metadata.create_all(self.engine)
 
         # Add append-only triggers
-        with self.engine.connect() as conn:
-            for statement in APPEND_ONLY_TRIGGER.split(";"):
-                statement = statement.strip()
-                if statement:
-                    try:
-                        conn.execute(text(statement))
-                    except Exception as e:
-                        # Trigger may already exist
-                        logger.debug("Trigger creation: %s", e)
-            conn.commit()
+        with self.engine.begin() as conn:
+            for statement in APPEND_ONLY_TRIGGERS:
+                conn.execute(text(statement))
 
         logger.info("Database schema initialized: %s", self.db_path)
 
@@ -142,9 +134,7 @@ class AuditDatabase:
             Device or None if not found
         """
         with self.session() as session:
-            device = session.query(Device).filter(
-                Device.fingerprint == fingerprint
-            ).first()
+            device = session.query(Device).filter(Device.fingerprint == fingerprint).first()
             if device:
                 session.expunge(device)
             return device
@@ -161,10 +151,14 @@ class AuditDatabase:
             List of matching devices
         """
         with self.session() as session:
-            devices = session.query(Device).filter(
-                Device.vid == vid.lower(),
-                Device.pid == pid.lower(),
-            ).all()
+            devices = (
+                session.query(Device)
+                .filter(
+                    Device.vid == vid.lower(),
+                    Device.pid == pid.lower(),
+                )
+                .all()
+            )
             for d in devices:
                 session.expunge(d)
             return devices
@@ -237,9 +231,7 @@ class AuditDatabase:
             trust_level = trust_level.value
 
         with self.session() as session:
-            device = session.query(Device).filter(
-                Device.fingerprint == fingerprint
-            ).first()
+            device = session.query(Device).filter(Device.fingerprint == fingerprint).first()
 
             if device is None:
                 device = Device(
@@ -289,26 +281,19 @@ class AuditDatabase:
             trust_level = trust_level.value
 
         with self.session() as session:
-            device = session.query(Device).filter(
-                Device.fingerprint == fingerprint
-            ).first()
+            device = session.query(Device).filter(Device.fingerprint == fingerprint).first()
 
             if device is None:
                 return False
 
             device.trust_level = trust_level
-            logger.info(
-                "Updated trust level for %s: %s",
-                fingerprint, trust_level
-            )
+            logger.info("Updated trust level for %s: %s", fingerprint, trust_level)
             return True
 
     def device_exists(self, fingerprint: str) -> bool:
         """Check if device exists in database."""
         with self.session() as session:
-            return session.query(Device).filter(
-                Device.fingerprint == fingerprint
-            ).count() > 0
+            return session.query(Device).filter(Device.fingerprint == fingerprint).count() > 0
 
     def count_devices(self, trust_level: TrustLevel | str | None = None) -> int:
         """
@@ -358,13 +343,9 @@ class AuditDatabase:
             if "pid" in filters:
                 query = query.filter(Device.pid == filters["pid"].lower())
             if "manufacturer" in filters:
-                query = query.filter(
-                    Device.manufacturer.ilike(f"%{filters['manufacturer']}%")
-                )
+                query = query.filter(Device.manufacturer.ilike(f"%{filters['manufacturer']}%"))
             if "product" in filters:
-                query = query.filter(
-                    Device.product.ilike(f"%{filters['product']}%")
-                )
+                query = query.filter(Device.product.ilike(f"%{filters['product']}%"))
 
             # Get total count before pagination
             total = query.count()
@@ -394,9 +375,7 @@ class AuditDatabase:
             True if device was found and updated
         """
         with self.session() as session:
-            device = session.query(Device).filter(
-                Device.fingerprint == fingerprint
-            ).first()
+            device = session.query(Device).filter(Device.fingerprint == fingerprint).first()
 
             if device is None:
                 return False
@@ -442,9 +421,7 @@ class AuditDatabase:
 
         with self.session() as session:
             # Ensure device exists
-            device = session.query(Device).filter(
-                Device.fingerprint == device_fingerprint
-            ).first()
+            device = session.query(Device).filter(Device.fingerprint == device_fingerprint).first()
 
             if device is None:
                 raise ValueError(f"Device not found: {device_fingerprint}")
@@ -466,8 +443,7 @@ class AuditDatabase:
             session.refresh(event)
 
             logger.debug(
-                "Logged event: %s %s (verdict=%s)",
-                event_type, device_fingerprint, verdict
+                "Logged event: %s %s (verdict=%s)", event_type, device_fingerprint, verdict
             )
 
             session.expunge(event)
@@ -595,9 +571,7 @@ class AuditDatabase:
 
             # Apply filters
             if "device_fingerprint" in filters:
-                query = query.filter(
-                    Event.device_fingerprint == filters["device_fingerprint"]
-                )
+                query = query.filter(Event.device_fingerprint == filters["device_fingerprint"])
             if "event_type" in filters:
                 query = query.filter(Event.event_type == filters["event_type"])
             if "since" in filters:
@@ -741,30 +715,38 @@ class AuditDatabase:
             # Trust level breakdown
             trust_counts = {}
             for level in TrustLevel:
-                count = session.query(func.count(Device.id)).filter(
-                    Device.trust_level == level.value
-                ).scalar()
+                count = (
+                    session.query(func.count(Device.id))
+                    .filter(Device.trust_level == level.value)
+                    .scalar()
+                )
                 trust_counts[level.value] = count
 
             # Event type breakdown
             event_counts = {}
             for etype in EventType:
-                count = session.query(func.count(Event.id)).filter(
-                    Event.event_type == etype.value
-                ).scalar()
+                count = (
+                    session.query(func.count(Event.id))
+                    .filter(Event.event_type == etype.value)
+                    .scalar()
+                )
                 event_counts[etype.value] = count
 
             # Recent activity
             last_24h = datetime.now(timezone.utc) - timedelta(hours=24)
-            recent_events = session.query(func.count(Event.id)).filter(
-                Event.timestamp >= last_24h
-            ).scalar()
+            recent_events = (
+                session.query(func.count(Event.id)).filter(Event.timestamp >= last_24h).scalar()
+            )
 
             # Blocked in last 24h
-            blocked_24h = session.query(func.count(Event.id)).filter(
-                Event.timestamp >= last_24h,
-                Event.event_type == EventType.BLOCKED.value,
-            ).scalar()
+            blocked_24h = (
+                session.query(func.count(Event.id))
+                .filter(
+                    Event.timestamp >= last_24h,
+                    Event.event_type == EventType.BLOCKED.value,
+                )
+                .scalar()
+            )
 
             return {
                 "total_devices": total_devices,
@@ -788,43 +770,59 @@ class AuditDatabase:
             total_events = session.query(func.count(Event.id)).scalar()
 
             # Trust level counts
-            trusted_devices = session.query(func.count(Device.id)).filter(
-                Device.trust_level == TrustLevel.TRUSTED.value
-            ).scalar()
-            blocked_devices = session.query(func.count(Device.id)).filter(
-                Device.trust_level == TrustLevel.BLOCKED.value
-            ).scalar()
-            unknown_devices = session.query(func.count(Device.id)).filter(
-                Device.trust_level == TrustLevel.UNKNOWN.value
-            ).scalar()
+            trusted_devices = (
+                session.query(func.count(Device.id))
+                .filter(Device.trust_level == TrustLevel.TRUSTED.value)
+                .scalar()
+            )
+            blocked_devices = (
+                session.query(func.count(Device.id))
+                .filter(Device.trust_level == TrustLevel.BLOCKED.value)
+                .scalar()
+            )
+            unknown_devices = (
+                session.query(func.count(Device.id))
+                .filter(Device.trust_level == TrustLevel.UNKNOWN.value)
+                .scalar()
+            )
 
             # Time-based statistics
             now = datetime.now(timezone.utc)
             today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
             week_start = today_start - timedelta(days=now.weekday())
 
-            events_today = session.query(func.count(Event.id)).filter(
-                Event.timestamp >= today_start
-            ).scalar()
+            events_today = (
+                session.query(func.count(Event.id)).filter(Event.timestamp >= today_start).scalar()
+            )
 
-            events_this_week = session.query(func.count(Event.id)).filter(
-                Event.timestamp >= week_start
-            ).scalar()
+            events_this_week = (
+                session.query(func.count(Event.id)).filter(Event.timestamp >= week_start).scalar()
+            )
 
-            blocked_today = session.query(func.count(Event.id)).filter(
-                Event.timestamp >= today_start,
-                Event.event_type == EventType.BLOCKED.value,
-            ).scalar()
+            blocked_today = (
+                session.query(func.count(Event.id))
+                .filter(
+                    Event.timestamp >= today_start,
+                    Event.event_type == EventType.BLOCKED.value,
+                )
+                .scalar()
+            )
 
-            allowed_today = session.query(func.count(Event.id)).filter(
-                Event.timestamp >= today_start,
-                Event.event_type == EventType.ALLOWED.value,
-            ).scalar()
+            allowed_today = (
+                session.query(func.count(Event.id))
+                .filter(
+                    Event.timestamp >= today_start,
+                    Event.event_type == EventType.ALLOWED.value,
+                )
+                .scalar()
+            )
 
             # Average risk score
-            avg_risk = session.query(func.avg(Event.risk_score)).filter(
-                Event.risk_score.isnot(None)
-            ).scalar()
+            avg_risk = (
+                session.query(func.avg(Event.risk_score))
+                .filter(Event.risk_score.isnot(None))
+                .scalar()
+            )
 
             return {
                 "total_devices": total_devices,
@@ -850,33 +848,45 @@ class AuditDatabase:
             Dictionary with device statistics
         """
         with self.session() as session:
-            device = session.query(Device).filter(
-                Device.fingerprint == fingerprint
-            ).first()
+            device = session.query(Device).filter(Device.fingerprint == fingerprint).first()
 
             if device is None:
                 return {}
 
             # Count events by type
-            event_count = session.query(func.count(Event.id)).filter(
-                Event.device_fingerprint == fingerprint
-            ).scalar()
+            event_count = (
+                session.query(func.count(Event.id))
+                .filter(Event.device_fingerprint == fingerprint)
+                .scalar()
+            )
 
-            times_blocked = session.query(func.count(Event.id)).filter(
-                Event.device_fingerprint == fingerprint,
-                Event.event_type == EventType.BLOCKED.value,
-            ).scalar()
+            times_blocked = (
+                session.query(func.count(Event.id))
+                .filter(
+                    Event.device_fingerprint == fingerprint,
+                    Event.event_type == EventType.BLOCKED.value,
+                )
+                .scalar()
+            )
 
-            times_allowed = session.query(func.count(Event.id)).filter(
-                Event.device_fingerprint == fingerprint,
-                Event.event_type == EventType.ALLOWED.value,
-            ).scalar()
+            times_allowed = (
+                session.query(func.count(Event.id))
+                .filter(
+                    Event.device_fingerprint == fingerprint,
+                    Event.event_type == EventType.ALLOWED.value,
+                )
+                .scalar()
+            )
 
             # Average risk score for this device
-            avg_risk = session.query(func.avg(Event.risk_score)).filter(
-                Event.device_fingerprint == fingerprint,
-                Event.risk_score.isnot(None),
-            ).scalar()
+            avg_risk = (
+                session.query(func.avg(Event.risk_score))
+                .filter(
+                    Event.device_fingerprint == fingerprint,
+                    Event.risk_score.isnot(None),
+                )
+                .scalar()
+            )
 
             return {
                 "event_count": event_count,

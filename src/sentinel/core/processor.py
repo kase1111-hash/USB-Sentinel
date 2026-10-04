@@ -9,20 +9,20 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Coroutine
+from typing import Any
 
 from sentinel.audit.database import AuditDatabase
-from sentinel.audit.models import EventType as AuditEventType, TrustLevel
+from sentinel.audit.models import EventType as AuditEventType
 from sentinel.interceptor.descriptors import DeviceDescriptor
 from sentinel.interceptor.validator import ValidationResult, validate_descriptor
 from sentinel.policy.engine import EvaluationResult, PolicyEngine
 from sentinel.policy.fingerprint import FingerprintDatabase, generate_fingerprint
 from sentinel.policy.models import Action
-
 
 logger = logging.getLogger(__name__)
 
@@ -192,9 +192,7 @@ class DeviceProcessor:
         validation_result = validate_descriptor(device)
 
         # Step 3: Compute combined risk score
-        risk_score = self._compute_risk_score(
-            policy_result, validation_result, is_first_seen
-        )
+        risk_score = self._compute_risk_score(policy_result, validation_result, is_first_seen)
 
         # Step 4: Determine final verdict
         verdict, requires_llm = self._determine_verdict(
@@ -220,8 +218,9 @@ class DeviceProcessor:
         # Update fingerprint database
         if is_first_seen:
             fp = self.policy_engine.fingerprint_db
-            if hasattr(fp, 'add'):
+            if hasattr(fp, "add"):
                 from sentinel.policy.fingerprint import DeviceFingerprint
+
                 fp_obj = DeviceFingerprint(
                     fingerprint=fingerprint,
                     full_hash=fingerprint,
@@ -248,7 +247,11 @@ class DeviceProcessor:
 
         logger.info(
             "Processed device %s:%s -> %s (score=%d, time=%.1fms)",
-            device.vid, device.pid, verdict.value, risk_score, processing_time
+            device.vid,
+            device.pid,
+            verdict.value,
+            risk_score,
+            processing_time,
         )
 
         return result
@@ -305,9 +308,7 @@ class DeviceProcessor:
             similar_devices = None
             if self.audit_db:
                 try:
-                    history = self.audit_db.get_device_events(
-                        result.fingerprint, limit=10
-                    )
+                    history = self.audit_db.get_device_events(result.fingerprint, limit=10)
                     similar_devices = self.audit_db.get_events_by_vid_pid(
                         result.device.vid, result.device.pid, limit=5
                     )
@@ -333,9 +334,7 @@ class DeviceProcessor:
             result.llm_analysis = f"Analysis failed: {e}"
             return result
 
-    async def analyze_with_llm_async(
-        self, result: ProcessingResult
-    ) -> ProcessingResult:
+    async def analyze_with_llm_async(self, result: ProcessingResult) -> ProcessingResult:
         """
         Perform async LLM analysis on a device that requires review.
 
@@ -355,9 +354,7 @@ class DeviceProcessor:
             similar_devices = None
             if self.audit_db:
                 try:
-                    history = self.audit_db.get_device_events(
-                        result.fingerprint, limit=10
-                    )
+                    history = self.audit_db.get_device_events(result.fingerprint, limit=10)
                     similar_devices = self.audit_db.get_events_by_vid_pid(
                         result.device.vid, result.device.pid, limit=5
                     )
@@ -434,7 +431,6 @@ class DeviceProcessor:
         Returns:
             Tuple of (Verdict, requires_llm)
         """
-        requires_llm = False
 
         # Explicit BLOCK from policy always blocks
         if policy_result.action == Action.BLOCK:
@@ -446,7 +442,7 @@ class DeviceProcessor:
             if validation_result.risk_score >= self.block_threshold:
                 logger.warning(
                     "Policy allows but validation score %d exceeds block threshold",
-                    validation_result.risk_score
+                    validation_result.risk_score,
                 )
                 return Verdict.SANDBOX, True
             return Verdict.ALLOW, False
@@ -459,7 +455,6 @@ class DeviceProcessor:
             return Verdict.SANDBOX, True
 
         if risk_score >= self.review_threshold:
-            requires_llm = True
             return Verdict.REVIEW, True
 
         # Low risk - allow with monitoring
@@ -672,10 +667,7 @@ class PolicyWatcher:
             errors = self.processor.policy_engine.reload_policy(self.policy_path)
             for error in errors:
                 logger.warning("Policy reload warning: %s", error)
-            logger.info(
-                "Policy reloaded: %d rules",
-                len(self.processor.policy_engine.policy.rules)
-            )
+            logger.info("Policy reloaded: %d rules", len(self.processor.policy_engine.policy.rules))
         except Exception as e:
             logger.error("Failed to reload policy: %s", e)
 
@@ -734,6 +726,7 @@ def create_processor(
     if analyzer is None and (api_key or use_mock_analyzer):
         try:
             from sentinel.analyzer import create_analyzer
+
             analyzer = create_analyzer(
                 api_key=api_key,
                 use_mock=use_mock_analyzer,

@@ -17,7 +17,6 @@ from sentinel.interceptor.descriptors import (
 from sentinel.interceptor.validator import (
     Anomaly,
     AnomalyType,
-    DescriptorValidator,
     Severity,
     ValidationResult,
     validate_descriptor,
@@ -277,10 +276,7 @@ class TestDescriptorValidator:
         result = validate_descriptor(desc)
 
         assert result.has_anomalies
-        assert any(
-            a.anomaly_type == AnomalyType.ATTACK_SIGNATURE
-            for a in result.anomalies
-        )
+        assert any(a.anomaly_type == AnomalyType.ATTACK_SIGNATURE for a in result.anomalies)
         assert result.risk_score >= 50
 
     def test_detect_hid_storage_combo(self) -> None:
@@ -295,10 +291,7 @@ class TestDescriptorValidator:
 
         result = validate_descriptor(desc)
 
-        assert any(
-            a.anomaly_type == AnomalyType.SUSPICIOUS_CLASS_COMBO
-            for a in result.anomalies
-        )
+        assert any(a.anomaly_type == AnomalyType.SUSPICIOUS_CLASS_COMBO for a in result.anomalies)
 
     def test_detect_missing_manufacturer(self) -> None:
         """Test detection of missing manufacturer."""
@@ -309,10 +302,7 @@ class TestDescriptorValidator:
 
         result = validate_descriptor(desc)
 
-        assert any(
-            a.anomaly_type == AnomalyType.MISSING_MANUFACTURER
-            for a in result.anomalies
-        )
+        assert any(a.anomaly_type == AnomalyType.MISSING_MANUFACTURER for a in result.anomalies)
 
     def test_detect_generic_strings(self) -> None:
         """Test detection of generic strings."""
@@ -323,10 +313,7 @@ class TestDescriptorValidator:
 
         result = validate_descriptor(desc)
 
-        assert any(
-            a.anomaly_type == AnomalyType.GENERIC_STRINGS
-            for a in result.anomalies
-        )
+        assert any(a.anomaly_type == AnomalyType.GENERIC_STRINGS for a in result.anomalies)
 
     def test_detect_suspicious_patterns(self) -> None:
         """Test detection of suspicious string patterns."""
@@ -351,11 +338,13 @@ class TestValidationResult:
         """Test adding anomalies."""
         result = ValidationResult(is_valid=True)
 
-        result.add_anomaly(Anomaly(
-            anomaly_type=AnomalyType.MISSING_MANUFACTURER,
-            severity=Severity.MEDIUM,
-            description="Test anomaly",
-        ))
+        result.add_anomaly(
+            Anomaly(
+                anomaly_type=AnomalyType.MISSING_MANUFACTURER,
+                severity=Severity.MEDIUM,
+                description="Test anomaly",
+            )
+        )
 
         assert result.has_anomalies
         assert len(result.anomalies) == 1
@@ -365,16 +354,20 @@ class TestValidationResult:
         """Test highest severity property."""
         result = ValidationResult(is_valid=True)
 
-        result.add_anomaly(Anomaly(
-            anomaly_type=AnomalyType.MISSING_PRODUCT,
-            severity=Severity.LOW,
-            description="Low severity",
-        ))
-        result.add_anomaly(Anomaly(
-            anomaly_type=AnomalyType.ATTACK_SIGNATURE,
-            severity=Severity.CRITICAL,
-            description="Critical severity",
-        ))
+        result.add_anomaly(
+            Anomaly(
+                anomaly_type=AnomalyType.MISSING_PRODUCT,
+                severity=Severity.LOW,
+                description="Low severity",
+            )
+        )
+        result.add_anomaly(
+            Anomaly(
+                anomaly_type=AnomalyType.ATTACK_SIGNATURE,
+                severity=Severity.CRITICAL,
+                description="Critical severity",
+            )
+        )
 
         assert result.highest_severity == Severity.CRITICAL
 
@@ -384,11 +377,13 @@ class TestValidationResult:
 
         # Add multiple anomalies
         for _ in range(3):
-            result.add_anomaly(Anomaly(
-                anomaly_type=AnomalyType.MISSING_PRODUCT,
-                severity=Severity.MEDIUM,
-                description="Test",
-            ))
+            result.add_anomaly(
+                Anomaly(
+                    anomaly_type=AnomalyType.MISSING_PRODUCT,
+                    severity=Severity.MEDIUM,
+                    description="Test",
+                )
+            )
 
         # 3 x MEDIUM (20) = 60
         assert result.risk_score >= 50
@@ -396,11 +391,13 @@ class TestValidationResult:
     def test_to_dict(self) -> None:
         """Test serialization to dict."""
         result = ValidationResult(is_valid=True)
-        result.add_anomaly(Anomaly(
-            anomaly_type=AnomalyType.MISSING_MANUFACTURER,
-            severity=Severity.MEDIUM,
-            description="Test",
-        ))
+        result.add_anomaly(
+            Anomaly(
+                anomaly_type=AnomalyType.MISSING_MANUFACTURER,
+                severity=Severity.MEDIUM,
+                description="Test",
+            )
+        )
 
         d = result.to_dict()
         assert "is_valid" in d

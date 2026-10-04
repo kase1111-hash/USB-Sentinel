@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
@@ -67,7 +67,6 @@ from sentinel.api.websocket import (
 )
 
 if TYPE_CHECKING:
-    from sentinel.analyzer.llm import LLMAnalyzer
     from sentinel.audit.database import AuditDatabase
     from sentinel.policy.engine import PolicyEngine
 
@@ -170,9 +169,9 @@ def create_app(
 
 def configure_services(
     app: FastAPI,
-    db: "AuditDatabase | None" = None,
-    policy_engine: "PolicyEngine | None" = None,
-    analyzer: "LLMAnalyzer | None" = None,
+    db: AuditDatabase | None = None,
+    policy_engine: PolicyEngine | None = None,
+    analyzer: Any = None,
     default_api_key: str | None = None,
 ) -> None:
     """

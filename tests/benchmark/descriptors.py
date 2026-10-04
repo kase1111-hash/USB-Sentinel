@@ -1,7 +1,7 @@
 """
 Benchmark descriptor dataset for evaluating detection accuracy.
 
-Contains 25 malicious and 25 benign USB device descriptors modeled
+Contains 25 malicious and 28 benign USB device descriptors modeled
 after real-world hardware.  Each entry carries a ground-truth label
 so the benchmark harness can compute TP / FP / TN / FN.
 """
@@ -31,18 +31,27 @@ class LabeledDescriptor:
 # Helper builders
 # ---------------------------------------------------------------------------
 
-def _intf(cls: int, sub: int = 0, proto: int = 0, num_ep: int = 1,
-          eps: list[EndpointDescriptor] | None = None) -> InterfaceDescriptor:
+
+def _intf(
+    cls: int,
+    sub: int = 0,
+    proto: int = 0,
+    num_ep: int = 1,
+    eps: list[EndpointDescriptor] | None = None,
+) -> InterfaceDescriptor:
     """Shorthand for building an InterfaceDescriptor."""
     if eps is None:
-        eps = [EndpointDescriptor(address=0x81, attributes=0x03,
-                                  max_packet_size=8, interval=10)]
+        eps = [EndpointDescriptor(address=0x81, attributes=0x03, max_packet_size=8, interval=10)]
         # pad to match num_ep
         while len(eps) < num_ep:
-            eps.append(EndpointDescriptor(
-                address=0x81 + len(eps), attributes=0x03,
-                max_packet_size=8, interval=10,
-            ))
+            eps.append(
+                EndpointDescriptor(
+                    address=0x81 + len(eps),
+                    attributes=0x03,
+                    max_packet_size=8,
+                    interval=10,
+                )
+            )
     return InterfaceDescriptor(
         interface_class=cls,
         interface_subclass=sub,
@@ -54,23 +63,32 @@ def _intf(cls: int, sub: int = 0, proto: int = 0, num_ep: int = 1,
 
 def _bulk_ep(addr: int = 0x81) -> EndpointDescriptor:
     """Create a bulk transfer endpoint."""
-    return EndpointDescriptor(address=addr, attributes=0x02,
-                              max_packet_size=512, interval=0)
+    return EndpointDescriptor(address=addr, attributes=0x02, max_packet_size=512, interval=0)
 
 
 def _intr_ep(addr: int = 0x81) -> EndpointDescriptor:
     """Create an interrupt transfer endpoint."""
-    return EndpointDescriptor(address=addr, attributes=0x03,
-                              max_packet_size=8, interval=10)
+    return EndpointDescriptor(address=addr, attributes=0x03, max_packet_size=8, interval=10)
 
 
-def _desc(vid: str, pid: str, mfr: str | None, prod: str | None,
-          intfs: list[InterfaceDescriptor],
-          dev_class: int = 0, serial: str | None = None) -> DeviceDescriptor:
+def _desc(
+    vid: str,
+    pid: str,
+    mfr: str | None,
+    prod: str | None,
+    intfs: list[InterfaceDescriptor],
+    dev_class: int = 0,
+    serial: str | None = None,
+) -> DeviceDescriptor:
     return DeviceDescriptor(
-        vid=vid, pid=pid,
-        device_class=dev_class, device_subclass=0, device_protocol=0,
-        manufacturer=mfr, product=prod, serial=serial,
+        vid=vid,
+        pid=pid,
+        device_class=dev_class,
+        device_subclass=0,
+        device_protocol=0,
+        manufacturer=mfr,
+        product=prod,
+        serial=serial,
         interfaces=intfs,
     )
 
@@ -86,7 +104,10 @@ MALICIOUS: list[LabeledDescriptor] = [
         is_malicious=True,
         attack_type="keystroke_injection",
         descriptor=_desc(
-            vid="03eb", pid="2ff4", mfr="Atmel Corp.", prod="ATmega32U4",
+            vid="03eb",
+            pid="2ff4",
+            mfr="Atmel Corp.",
+            prod="ATmega32U4",
             intfs=[_intf(0x03, 0x01, 0x01)],  # HID keyboard
         ),
     ),
@@ -96,11 +117,15 @@ MALICIOUS: list[LabeledDescriptor] = [
         is_malicious=True,
         attack_type="class_spoofing",
         descriptor=_desc(
-            vid="abcd", pid="1234", mfr=None, prod="USB Composite Device",
+            vid="abcd",
+            pid="1234",
+            mfr=None,
+            prod="USB Composite Device",
             intfs=[
                 _intf(0x03, 0x01, 0x01),  # HID keyboard
-                _intf(0x08, 0x06, 0x50, num_ep=2,
-                      eps=[_bulk_ep(0x81), _bulk_ep(0x02)]),  # mass storage
+                _intf(
+                    0x08, 0x06, 0x50, num_ep=2, eps=[_bulk_ep(0x81), _bulk_ep(0x02)]
+                ),  # mass storage
             ],
         ),
     ),
@@ -110,7 +135,9 @@ MALICIOUS: list[LabeledDescriptor] = [
         is_malicious=True,
         attack_type="vendor_spoofing",
         descriptor=_desc(
-            vid="046d", pid="ffff", mfr="Shenzhen Electronic Co.",
+            vid="046d",
+            pid="ffff",
+            mfr="Shenzhen Electronic Co.",
             prod="Wireless Receiver",
             intfs=[_intf(0x03, 0x01, 0x02)],  # HID mouse
         ),
@@ -121,7 +148,9 @@ MALICIOUS: list[LabeledDescriptor] = [
         is_malicious=True,
         attack_type="known_signature",
         descriptor=_desc(
-            vid="1a86", pid="7523", mfr="QinHeng Electronics",
+            vid="1a86",
+            pid="7523",
+            mfr="QinHeng Electronics",
             prod="CH340 serial converter",
             intfs=[_intf(0xFF, 0x01, 0x02)],  # vendor-specific
         ),
@@ -132,7 +161,10 @@ MALICIOUS: list[LabeledDescriptor] = [
         is_malicious=True,
         attack_type="keystroke_injection",
         descriptor=_desc(
-            vid="16c0", pid="0483", mfr="Teensy", prod="Teensy Keyboard/Mouse",
+            vid="16c0",
+            pid="0483",
+            mfr="Teensy",
+            prod="Teensy Keyboard/Mouse",
             intfs=[
                 _intf(0x03, 0x01, 0x01),  # HID keyboard
                 _intf(0x03, 0x01, 0x02),  # HID mouse
@@ -145,7 +177,10 @@ MALICIOUS: list[LabeledDescriptor] = [
         is_malicious=True,
         attack_type="keystroke_injection",
         descriptor=_desc(
-            vid="1781", pid="0c9f", mfr="Digispark", prod="DigiUSB",
+            vid="1781",
+            pid="0c9f",
+            mfr="Digispark",
+            prod="DigiUSB",
             intfs=[_intf(0x03, 0x00, 0x00)],
         ),
     ),
@@ -155,7 +190,9 @@ MALICIOUS: list[LabeledDescriptor] = [
         is_malicious=True,
         attack_type="firmware_attack",
         descriptor=_desc(
-            vid="0483", pid="df11", mfr="STMicroelectronics",
+            vid="0483",
+            pid="df11",
+            mfr="STMicroelectronics",
             prod="STM32 BOOTLOADER",
             intfs=[_intf(0xFE, 0x01, 0x02)],  # DFU
         ),
@@ -166,12 +203,14 @@ MALICIOUS: list[LabeledDescriptor] = [
         is_malicious=True,
         attack_type="multi_vector",
         descriptor=_desc(
-            vid="f000", pid="ff01", mfr="Hak5", prod="Bash Bunny",
+            vid="f000",
+            pid="ff01",
+            mfr="Hak5",
+            prod="Bash Bunny",
             intfs=[
-                _intf(0x03, 0x01, 0x01),       # HID keyboard
-                _intf(0x08, 0x06, 0x50, num_ep=2,
-                      eps=[_bulk_ep(0x81), _bulk_ep(0x02)]),
-                _intf(0x02, 0x06, 0x00),        # CDC (network)
+                _intf(0x03, 0x01, 0x01),  # HID keyboard
+                _intf(0x08, 0x06, 0x50, num_ep=2, eps=[_bulk_ep(0x81), _bulk_ep(0x02)]),
+                _intf(0x02, 0x06, 0x00),  # CDC (network)
             ],
         ),
     ),
@@ -181,10 +220,13 @@ MALICIOUS: list[LabeledDescriptor] = [
         is_malicious=True,
         attack_type="network_attack",
         descriptor=_desc(
-            vid="f000", pid="ff02", mfr="Hak5", prod="LAN Turtle",
+            vid="f000",
+            pid="ff02",
+            mfr="Hak5",
+            prod="LAN Turtle",
             intfs=[
-                _intf(0x02, 0x06, 0x00),        # CDC ethernet
-                _intf(0x0A, 0x00, 0x00),         # CDC-Data
+                _intf(0x02, 0x06, 0x00),  # CDC ethernet
+                _intf(0x0A, 0x00, 0x00),  # CDC-Data
             ],
         ),
     ),
@@ -194,7 +236,9 @@ MALICIOUS: list[LabeledDescriptor] = [
         is_malicious=True,
         attack_type="keystroke_injection",
         descriptor=_desc(
-            vid="1d6b", pid="0104", mfr="P4wnP1 by MaMe82",
+            vid="1d6b",
+            pid="0104",
+            mfr="P4wnP1 by MaMe82",
             prod="P4wnP1 HID Keyboard",
             intfs=[_intf(0x03, 0x01, 0x01)],  # HID keyboard
         ),
@@ -205,12 +249,14 @@ MALICIOUS: list[LabeledDescriptor] = [
         is_malicious=True,
         attack_type="keystroke_injection",
         descriptor=_desc(
-            vid="2341", pid="8036", mfr="Arduino LLC",
+            vid="2341",
+            pid="8036",
+            mfr="Arduino LLC",
             prod="Arduino Leonardo",
             intfs=[
-                _intf(0x02, 0x02, 0x01),       # CDC
-                _intf(0x0A, 0x00, 0x00),        # CDC-Data
-                _intf(0x03, 0x01, 0x01),        # HID keyboard
+                _intf(0x02, 0x02, 0x01),  # CDC
+                _intf(0x0A, 0x00, 0x00),  # CDC-Data
+                _intf(0x03, 0x01, 0x01),  # HID keyboard
             ],
         ),
     ),
@@ -220,9 +266,13 @@ MALICIOUS: list[LabeledDescriptor] = [
         is_malicious=True,
         attack_type="data_exfiltration",
         descriptor=_desc(
-            vid="1234", pid="5678", mfr=None, prod="USB Input Device",
-            intfs=[_intf(0x03, 0x00, 0x00, num_ep=1,
-                         eps=[_bulk_ep(0x81)])],  # HID with bulk = suspicious
+            vid="1234",
+            pid="5678",
+            mfr=None,
+            prod="USB Input Device",
+            intfs=[
+                _intf(0x03, 0x00, 0x00, num_ep=1, eps=[_bulk_ep(0x81)])
+            ],  # HID with bulk = suspicious
         ),
     ),
     # --- 13. Class mismatch (device_class != interface) ---
@@ -231,7 +281,10 @@ MALICIOUS: list[LabeledDescriptor] = [
         is_malicious=True,
         attack_type="class_spoofing",
         descriptor=_desc(
-            vid="dead", pid="cafe", mfr="Unknown", prod="USB Device",
+            vid="dead",
+            pid="cafe",
+            mfr="Unknown",
+            prod="USB Device",
             intfs=[_intf(0x03, 0x01, 0x01)],
             dev_class=0x08,  # claims mass-storage at device level
         ),
@@ -242,7 +295,10 @@ MALICIOUS: list[LabeledDescriptor] = [
         is_malicious=True,
         attack_type="anomalous_descriptor",
         descriptor=_desc(
-            vid="cafe", pid="babe", mfr="Suspicious Co", prod="Keyboard Pro",
+            vid="cafe",
+            pid="babe",
+            mfr="Suspicious Co",
+            prod="Keyboard Pro",
             intfs=[_intf(0x03, 0x01, 0x01, num_ep=5)],  # HID expects 1-2
         ),
     ),
@@ -252,13 +308,14 @@ MALICIOUS: list[LabeledDescriptor] = [
         is_malicious=True,
         attack_type="multi_vector",
         descriptor=_desc(
-            vid="1d6b", pid="0104", mfr="USB Armory Team",
+            vid="1d6b",
+            pid="0104",
+            mfr="USB Armory Team",
             prod="USB Armory Mk II",
             intfs=[
-                _intf(0x02, 0x06, 0x00),        # CDC
-                _intf(0x0A, 0x00, 0x00),         # CDC-Data
-                _intf(0x08, 0x06, 0x50, num_ep=2,
-                      eps=[_bulk_ep(0x81), _bulk_ep(0x02)]),
+                _intf(0x02, 0x06, 0x00),  # CDC
+                _intf(0x0A, 0x00, 0x00),  # CDC-Data
+                _intf(0x08, 0x06, 0x50, num_ep=2, eps=[_bulk_ep(0x81), _bulk_ep(0x02)]),
             ],
         ),
     ),
@@ -268,11 +325,13 @@ MALICIOUS: list[LabeledDescriptor] = [
         is_malicious=True,
         attack_type="multi_vector",
         descriptor=_desc(
-            vid="2e8a", pid="000a", mfr="Raspberry Pi",
+            vid="2e8a",
+            pid="000a",
+            mfr="Raspberry Pi",
             prod="Pico HID Payload",
             intfs=[
-                _intf(0x02, 0x02, 0x01),        # CDC
-                _intf(0x03, 0x01, 0x01),         # HID keyboard
+                _intf(0x02, 0x02, 0x01),  # CDC
+                _intf(0x03, 0x01, 0x01),  # HID keyboard
             ],
         ),
     ),
@@ -282,7 +341,10 @@ MALICIOUS: list[LabeledDescriptor] = [
         is_malicious=True,
         attack_type="anonymous_device",
         descriptor=_desc(
-            vid="0000", pid="0001", mfr=None, prod=None,
+            vid="0000",
+            pid="0001",
+            mfr=None,
+            prod=None,
             intfs=[_intf(0x03, 0x01, 0x01)],
         ),
     ),
@@ -292,10 +354,13 @@ MALICIOUS: list[LabeledDescriptor] = [
         is_malicious=True,
         attack_type="class_spoofing",
         descriptor=_desc(
-            vid="beef", pid="dead", mfr=None, prod="USB Device",
+            vid="beef",
+            pid="dead",
+            mfr=None,
+            prod="USB Device",
             intfs=[
-                _intf(0xFF, 0x00, 0x00),         # vendor-specific
-                _intf(0x03, 0x01, 0x01),         # HID keyboard
+                _intf(0xFF, 0x00, 0x00),  # vendor-specific
+                _intf(0x03, 0x01, 0x01),  # HID keyboard
             ],
         ),
     ),
@@ -305,7 +370,9 @@ MALICIOUS: list[LabeledDescriptor] = [
         is_malicious=True,
         attack_type="vendor_spoofing",
         descriptor=_desc(
-            vid="045e", pid="ffff", mfr="Generic Manufacturer",
+            vid="045e",
+            pid="ffff",
+            mfr="Generic Manufacturer",
             prod="USB Keyboard",
             intfs=[_intf(0x03, 0x01, 0x01)],
         ),
@@ -316,11 +383,13 @@ MALICIOUS: list[LabeledDescriptor] = [
         is_malicious=True,
         attack_type="multi_vector",
         descriptor=_desc(
-            vid="1337", pid="1337", mfr=None, prod="Multi Device",
+            vid="1337",
+            pid="1337",
+            mfr=None,
+            prod="Multi Device",
             intfs=[
                 _intf(0x03, 0x00, 0x00),
-                _intf(0x08, 0x06, 0x50, num_ep=2,
-                      eps=[_bulk_ep(0x81), _bulk_ep(0x02)]),
+                _intf(0x08, 0x06, 0x50, num_ep=2, eps=[_bulk_ep(0x81), _bulk_ep(0x02)]),
                 _intf(0xFF, 0x00, 0x00),
             ],
         ),
@@ -331,7 +400,9 @@ MALICIOUS: list[LabeledDescriptor] = [
         is_malicious=True,
         attack_type="vendor_spoofing",
         descriptor=_desc(
-            vid="05ac", pid="0000", mfr="Shenzhen Keyboard Co.",
+            vid="05ac",
+            pid="0000",
+            mfr="Shenzhen Keyboard Co.",
             prod="Apple Keyboard",
             intfs=[_intf(0x03, 0x01, 0x01)],
         ),
@@ -342,7 +413,9 @@ MALICIOUS: list[LabeledDescriptor] = [
         is_malicious=True,
         attack_type="anonymous_device",
         descriptor=_desc(
-            vid="1111", pid="2222", mfr="USB Device",
+            vid="1111",
+            pid="2222",
+            mfr="USB Device",
             prod="USB Keyboard",
             intfs=[_intf(0x03, 0x01, 0x01)],
         ),
@@ -353,13 +426,15 @@ MALICIOUS: list[LabeledDescriptor] = [
         is_malicious=True,
         attack_type="anomalous_descriptor",
         descriptor=_desc(
-            vid="3333", pid="4444", mfr="NoName", prod="Multi Gadget",
+            vid="3333",
+            pid="4444",
+            mfr="NoName",
+            prod="Multi Gadget",
             intfs=[
-                _intf(0x03, 0x01, 0x01),         # HID keyboard
-                _intf(0x03, 0x01, 0x02),         # HID mouse
-                _intf(0x08, 0x06, 0x50, num_ep=2,
-                      eps=[_bulk_ep(0x81), _bulk_ep(0x02)]),
-                _intf(0x02, 0x06, 0x00),         # CDC
+                _intf(0x03, 0x01, 0x01),  # HID keyboard
+                _intf(0x03, 0x01, 0x02),  # HID mouse
+                _intf(0x08, 0x06, 0x50, num_ep=2, eps=[_bulk_ep(0x81), _bulk_ep(0x02)]),
+                _intf(0x02, 0x06, 0x00),  # CDC
             ],
         ),
     ),
@@ -369,10 +444,13 @@ MALICIOUS: list[LabeledDescriptor] = [
         is_malicious=True,
         attack_type="firmware_attack",
         descriptor=_desc(
-            vid="5555", pid="6666", mfr="Unknown", prod="Programmable Keyboard",
+            vid="5555",
+            pid="6666",
+            mfr="Unknown",
+            prod="Programmable Keyboard",
             intfs=[
-                _intf(0x03, 0x01, 0x01),         # HID keyboard
-                _intf(0xFE, 0x01, 0x02),         # DFU
+                _intf(0x03, 0x01, 0x01),  # HID keyboard
+                _intf(0xFE, 0x01, 0x02),  # DFU
             ],
         ),
     ),
@@ -382,7 +460,9 @@ MALICIOUS: list[LabeledDescriptor] = [
         is_malicious=True,
         attack_type="keystroke_injection",
         descriptor=_desc(
-            vid="aaaa", pid="bbbb", mfr="Atmel Corporation",
+            vid="aaaa",
+            pid="bbbb",
+            mfr="Atmel Corporation",
             prod="ATxmega128A4U",
             intfs=[_intf(0x03, 0x01, 0x01)],
         ),
@@ -400,10 +480,13 @@ BENIGN: list[LabeledDescriptor] = [
         name="Logitech Unifying Receiver",
         is_malicious=False,
         descriptor=_desc(
-            vid="046d", pid="c534", mfr="Logitech", prod="USB Receiver",
+            vid="046d",
+            pid="c534",
+            mfr="Logitech",
+            prod="USB Receiver",
             intfs=[
-                _intf(0x03, 0x01, 0x01),         # HID keyboard
-                _intf(0x03, 0x01, 0x02),         # HID mouse
+                _intf(0x03, 0x01, 0x01),  # HID keyboard
+                _intf(0x03, 0x01, 0x02),  # HID mouse
             ],
         ),
     ),
@@ -412,7 +495,10 @@ BENIGN: list[LabeledDescriptor] = [
         name="Microsoft Sculpt Keyboard",
         is_malicious=False,
         descriptor=_desc(
-            vid="045e", pid="07a5", mfr="Microsoft", prod="Microsoft Sculpt",
+            vid="045e",
+            pid="07a5",
+            mfr="Microsoft",
+            prod="Microsoft Sculpt",
             intfs=[_intf(0x03, 0x01, 0x01)],
         ),
     ),
@@ -421,7 +507,10 @@ BENIGN: list[LabeledDescriptor] = [
         name="Apple Magic Keyboard",
         is_malicious=False,
         descriptor=_desc(
-            vid="05ac", pid="024f", mfr="Apple Inc.", prod="Magic Keyboard",
+            vid="05ac",
+            pid="024f",
+            mfr="Apple Inc.",
+            prod="Magic Keyboard",
             intfs=[_intf(0x03, 0x01, 0x01)],
         ),
     ),
@@ -430,7 +519,10 @@ BENIGN: list[LabeledDescriptor] = [
         name="Logitech MX Master",
         is_malicious=False,
         descriptor=_desc(
-            vid="046d", pid="c52b", mfr="Logitech", prod="MX Master 3",
+            vid="046d",
+            pid="c52b",
+            mfr="Logitech",
+            prod="MX Master 3",
             intfs=[_intf(0x03, 0x01, 0x02)],
         ),
     ),
@@ -439,9 +531,11 @@ BENIGN: list[LabeledDescriptor] = [
         name="Kingston DataTraveler 32GB",
         is_malicious=False,
         descriptor=_desc(
-            vid="0951", pid="1666", mfr="Kingston", prod="DataTraveler 3.0",
-            intfs=[_intf(0x08, 0x06, 0x50, num_ep=2,
-                         eps=[_bulk_ep(0x81), _bulk_ep(0x02)])],
+            vid="0951",
+            pid="1666",
+            mfr="Kingston",
+            prod="DataTraveler 3.0",
+            intfs=[_intf(0x08, 0x06, 0x50, num_ep=2, eps=[_bulk_ep(0x81), _bulk_ep(0x02)])],
         ),
     ),
     # --- 6. SanDisk Cruzer Blade ---
@@ -449,9 +543,11 @@ BENIGN: list[LabeledDescriptor] = [
         name="SanDisk Cruzer Blade",
         is_malicious=False,
         descriptor=_desc(
-            vid="0781", pid="5567", mfr="SanDisk", prod="Cruzer Blade",
-            intfs=[_intf(0x08, 0x06, 0x50, num_ep=2,
-                         eps=[_bulk_ep(0x81), _bulk_ep(0x02)])],
+            vid="0781",
+            pid="5567",
+            mfr="SanDisk",
+            prod="Cruzer Blade",
+            intfs=[_intf(0x08, 0x06, 0x50, num_ep=2, eps=[_bulk_ep(0x81), _bulk_ep(0x02)])],
         ),
     ),
     # --- 7. Logitech C920 Webcam ---
@@ -459,7 +555,10 @@ BENIGN: list[LabeledDescriptor] = [
         name="Logitech C920 Webcam",
         is_malicious=False,
         descriptor=_desc(
-            vid="046d", pid="082d", mfr="Logitech", prod="HD Pro Webcam C920",
+            vid="046d",
+            pid="082d",
+            mfr="Logitech",
+            prod="HD Pro Webcam C920",
             intfs=[
                 _intf(0x0E, 0x01, 0x00, num_ep=1),  # video control
                 _intf(0x0E, 0x02, 0x00, num_ep=1),  # video streaming
@@ -473,9 +572,11 @@ BENIGN: list[LabeledDescriptor] = [
         name="HP LaserJet Printer",
         is_malicious=False,
         descriptor=_desc(
-            vid="03f0", pid="4117", mfr="Hewlett-Packard", prod="LaserJet Pro",
-            intfs=[_intf(0x07, 0x01, 0x02, num_ep=2,
-                         eps=[_bulk_ep(0x81), _bulk_ep(0x02)])],
+            vid="03f0",
+            pid="4117",
+            mfr="Hewlett-Packard",
+            prod="LaserJet Pro",
+            intfs=[_intf(0x07, 0x01, 0x02, num_ep=2, eps=[_bulk_ep(0x81), _bulk_ep(0x02)])],
         ),
     ),
     # --- 9. Intel Bluetooth adapter ---
@@ -483,7 +584,10 @@ BENIGN: list[LabeledDescriptor] = [
         name="Intel Bluetooth Adapter",
         is_malicious=False,
         descriptor=_desc(
-            vid="8087", pid="0029", mfr="Intel Corp.", prod="AX201 Bluetooth",
+            vid="8087",
+            pid="0029",
+            mfr="Intel Corp.",
+            prod="AX201 Bluetooth",
             intfs=[
                 _intf(0xE0, 0x01, 0x01, num_ep=3),  # BT event+ACL+SCO
             ],
@@ -495,11 +599,13 @@ BENIGN: list[LabeledDescriptor] = [
         name="Realtek USB Ethernet",
         is_malicious=False,
         descriptor=_desc(
-            vid="0bda", pid="8153", mfr="Realtek", prod="RTL8153 Gigabit",
+            vid="0bda",
+            pid="8153",
+            mfr="Realtek",
+            prod="RTL8153 Gigabit",
             intfs=[
-                _intf(0x02, 0x06, 0x00),        # CDC ethernet
-                _intf(0x0A, 0x00, 0x00, num_ep=2,
-                      eps=[_bulk_ep(0x81), _bulk_ep(0x02)]),
+                _intf(0x02, 0x06, 0x00),  # CDC ethernet
+                _intf(0x0A, 0x00, 0x00, num_ep=2, eps=[_bulk_ep(0x81), _bulk_ep(0x02)]),
             ],
             dev_class=0x02,
         ),
@@ -509,7 +615,9 @@ BENIGN: list[LabeledDescriptor] = [
         name="Generic USB 3.0 Hub",
         is_malicious=False,
         descriptor=_desc(
-            vid="0424", pid="5744", mfr="Microchip Technology",
+            vid="0424",
+            pid="5744",
+            mfr="Microchip Technology",
             prod="USB 5744 Hub",
             intfs=[_intf(0x09, 0x00, 0x00, num_ep=1)],
             dev_class=0x09,
@@ -520,7 +628,10 @@ BENIGN: list[LabeledDescriptor] = [
         name="USB Audio DAC",
         is_malicious=False,
         descriptor=_desc(
-            vid="20b1", pid="3066", mfr="XMOS Ltd", prod="XMOS USB Audio 2.0",
+            vid="20b1",
+            pid="3066",
+            mfr="XMOS Ltd",
+            prod="XMOS USB Audio 2.0",
             intfs=[
                 _intf(0x01, 0x01, 0x20, num_ep=1),  # audio control
                 _intf(0x01, 0x02, 0x20, num_ep=2),  # audio streaming
@@ -532,10 +643,13 @@ BENIGN: list[LabeledDescriptor] = [
         name="Corsair K70 Keyboard",
         is_malicious=False,
         descriptor=_desc(
-            vid="1b1c", pid="1b13", mfr="Corsair", prod="Corsair K70 RGB",
+            vid="1b1c",
+            pid="1b13",
+            mfr="Corsair",
+            prod="Corsair K70 RGB",
             intfs=[
-                _intf(0x03, 0x01, 0x01),         # HID keyboard
-                _intf(0x03, 0x00, 0x00),          # HID extra keys
+                _intf(0x03, 0x01, 0x01),  # HID keyboard
+                _intf(0x03, 0x00, 0x00),  # HID extra keys
             ],
         ),
     ),
@@ -544,11 +658,13 @@ BENIGN: list[LabeledDescriptor] = [
         name="Razer DeathAdder Mouse",
         is_malicious=False,
         descriptor=_desc(
-            vid="1532", pid="0084", mfr="Razer Inc.",
+            vid="1532",
+            pid="0084",
+            mfr="Razer Inc.",
             prod="Razer DeathAdder V2",
             intfs=[
-                _intf(0x03, 0x01, 0x02),         # HID mouse
-                _intf(0x03, 0x00, 0x00),          # HID extra
+                _intf(0x03, 0x01, 0x02),  # HID mouse
+                _intf(0x03, 0x00, 0x00),  # HID extra
             ],
         ),
     ),
@@ -557,7 +673,9 @@ BENIGN: list[LabeledDescriptor] = [
         name="Chicony HD Webcam",
         is_malicious=False,
         descriptor=_desc(
-            vid="04f2", pid="b604", mfr="Chicony Electronics",
+            vid="04f2",
+            pid="b604",
+            mfr="Chicony Electronics",
             prod="HD Webcam",
             intfs=[
                 _intf(0x0E, 0x01, 0x00, num_ep=1),
@@ -570,7 +688,10 @@ BENIGN: list[LabeledDescriptor] = [
         name="Samsung Galaxy MTP",
         is_malicious=False,
         descriptor=_desc(
-            vid="04e8", pid="6860", mfr="Samsung", prod="Galaxy S23",
+            vid="04e8",
+            pid="6860",
+            mfr="Samsung",
+            prod="Galaxy S23",
             intfs=[_intf(0x06, 0x01, 0x01, num_ep=3)],  # MTP
         ),
     ),
@@ -579,10 +700,13 @@ BENIGN: list[LabeledDescriptor] = [
         name="Yubikey 5",
         is_malicious=False,
         descriptor=_desc(
-            vid="1050", pid="0407", mfr="Yubico", prod="YubiKey OTP+FIDO+CCID",
+            vid="1050",
+            pid="0407",
+            mfr="Yubico",
+            prod="YubiKey OTP+FIDO+CCID",
             intfs=[
-                _intf(0x03, 0x00, 0x00),          # HID FIDO
-                _intf(0x0B, 0x00, 0x00),           # Smart Card
+                _intf(0x03, 0x00, 0x00),  # HID FIDO
+                _intf(0x0B, 0x00, 0x00),  # Smart Card
             ],
         ),
     ),
@@ -591,7 +715,9 @@ BENIGN: list[LabeledDescriptor] = [
         name="Silicon Labs CP2102",
         is_malicious=False,
         descriptor=_desc(
-            vid="10c4", pid="ea60", mfr="Silicon Labs",
+            vid="10c4",
+            pid="ea60",
+            mfr="Silicon Labs",
             prod="CP2102 USB to UART Bridge",
             intfs=[_intf(0xFF, 0x00, 0x00)],  # vendor-specific serial
         ),
@@ -601,7 +727,9 @@ BENIGN: list[LabeledDescriptor] = [
         name="Wacom Intuos Tablet",
         is_malicious=False,
         descriptor=_desc(
-            vid="056a", pid="0374", mfr="Wacom Co., Ltd.",
+            vid="056a",
+            pid="0374",
+            mfr="Wacom Co., Ltd.",
             prod="Wacom Intuos S",
             intfs=[_intf(0x03, 0x00, 0x00)],  # HID
         ),
@@ -611,7 +739,9 @@ BENIGN: list[LabeledDescriptor] = [
         name="Canon EOS R5",
         is_malicious=False,
         descriptor=_desc(
-            vid="04a9", pid="3218", mfr="Canon, Inc.",
+            vid="04a9",
+            pid="3218",
+            mfr="Canon, Inc.",
             prod="EOS R5",
             intfs=[_intf(0x06, 0x01, 0x01, num_ep=3)],  # PTP/MTP
         ),
@@ -621,11 +751,12 @@ BENIGN: list[LabeledDescriptor] = [
         name="Xbox Wireless Controller",
         is_malicious=False,
         descriptor=_desc(
-            vid="045e", pid="0b12", mfr="Microsoft",
+            vid="045e",
+            pid="0b12",
+            mfr="Microsoft",
             prod="Xbox Wireless Controller",
             intfs=[
-                _intf(0xFF, 0x47, 0xD0, num_ep=2,
-                      eps=[_intr_ep(0x81), _intr_ep(0x01)]),
+                _intf(0xFF, 0x47, 0xD0, num_ep=2, eps=[_intr_ep(0x81), _intr_ep(0x01)]),
             ],
         ),
     ),
@@ -634,10 +765,11 @@ BENIGN: list[LabeledDescriptor] = [
         name="Alcor Micro Card Reader",
         is_malicious=False,
         descriptor=_desc(
-            vid="058f", pid="6366", mfr="Alcor Micro",
+            vid="058f",
+            pid="6366",
+            mfr="Alcor Micro",
             prod="AU6435 Card Reader",
-            intfs=[_intf(0x08, 0x06, 0x50, num_ep=2,
-                         eps=[_bulk_ep(0x81), _bulk_ep(0x02)])],
+            intfs=[_intf(0x08, 0x06, 0x50, num_ep=2, eps=[_bulk_ep(0x81), _bulk_ep(0x02)])],
         ),
     ),
     # --- 23. Linux Foundation internal root hub ---
@@ -645,7 +777,9 @@ BENIGN: list[LabeledDescriptor] = [
         name="Linux USB Root Hub",
         is_malicious=False,
         descriptor=_desc(
-            vid="1d6b", pid="0002", mfr="Linux Foundation",
+            vid="1d6b",
+            pid="0002",
+            mfr="Linux Foundation",
             prod="USB 2.0 Root Hub",
             intfs=[_intf(0x09, 0x00, 0x00, num_ep=1)],
             dev_class=0x09,
@@ -656,10 +790,11 @@ BENIGN: list[LabeledDescriptor] = [
         name="Brother HL-L2370DW Printer",
         is_malicious=False,
         descriptor=_desc(
-            vid="04f9", pid="0054", mfr="Brother Industries",
+            vid="04f9",
+            pid="0054",
+            mfr="Brother Industries",
             prod="HL-L2370DW",
-            intfs=[_intf(0x07, 0x01, 0x02, num_ep=2,
-                         eps=[_bulk_ep(0x81), _bulk_ep(0x02)])],
+            intfs=[_intf(0x07, 0x01, 0x02, num_ep=2, eps=[_bulk_ep(0x81), _bulk_ep(0x02)])],
         ),
     ),
     # --- 25. Audio-Technica USB microphone ---
@@ -667,11 +802,77 @@ BENIGN: list[LabeledDescriptor] = [
         name="Audio-Technica AT2020USB+",
         is_malicious=False,
         descriptor=_desc(
-            vid="0909", pid="001b", mfr="Audio-Technica",
+            vid="0909",
+            pid="001b",
+            mfr="Audio-Technica",
             prod="AT2020USB+",
             intfs=[
                 _intf(0x01, 0x01, 0x00, num_ep=1),  # audio control
                 _intf(0x01, 0x02, 0x00, num_ep=1),  # audio streaming
+            ],
+        ),
+    ),
+    # --- 26-28: everyday hardware with less tidy descriptors ---
+    # --- 26. No-name keyboard (generic product string, extra HID iface) ---
+    LabeledDescriptor(
+        name="No-name USB keyboard (generic strings)",
+        is_malicious=False,
+        descriptor=_desc(
+            vid="1c4f",
+            pid="0002",
+            mfr="SIGMACHIP",
+            prod="USB Keyboard",
+            intfs=[
+                _intf(0x03, 0x01, 0x01, num_ep=1),  # boot keyboard
+                _intf(0x03, 0x00, 0x00, num_ep=1),  # consumer control keys
+            ],
+        ),
+    ),
+    # --- 27. UVC webcam: IAD device class, zero-bandwidth alt setting ---
+    LabeledDescriptor(
+        name="UVC webcam (IAD, alt settings)",
+        is_malicious=False,
+        descriptor=_desc(
+            vid="0c45",
+            pid="6366",
+            mfr="Sonix Technology Co., Ltd.",
+            prod="USB 2.0 Camera",
+            dev_class=0xEF,
+            intfs=[
+                _intf(0x0E, 0x01, 0x00, num_ep=1),  # video control
+                _intf(0x0E, 0x02, 0x00, num_ep=0, eps=[]),  # streaming, alt 0
+                _intf(
+                    0x0E,
+                    0x02,
+                    0x00,
+                    num_ep=1,
+                    eps=[
+                        EndpointDescriptor(
+                            address=0x82, attributes=0x05, max_packet_size=3072, interval=1
+                        )
+                    ],
+                ),  # streaming, alt 1 (isochronous)
+            ],
+        ),
+    ),
+    # --- 28. USB 3 SSD enclosure: BOT alt 0 + UAS alt 1 (4 endpoints) ---
+    LabeledDescriptor(
+        name="USB 3 SSD enclosure (UAS)",
+        is_malicious=False,
+        descriptor=_desc(
+            vid="152d",
+            pid="0578",
+            mfr="JMicron",
+            prod="USB to ATA/ATAPI Bridge",
+            intfs=[
+                _intf(0x08, 0x06, 0x50, num_ep=2, eps=[_bulk_ep(0x81), _bulk_ep(0x02)]),
+                _intf(
+                    0x08,
+                    0x06,
+                    0x62,
+                    num_ep=4,
+                    eps=[_bulk_ep(0x81), _bulk_ep(0x02), _bulk_ep(0x83), _bulk_ep(0x04)],
+                ),
             ],
         ),
     ),

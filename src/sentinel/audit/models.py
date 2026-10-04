@@ -10,13 +10,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
-
-def _utc_now() -> datetime:
-    """Get current UTC time (timezone-aware)."""
-    return datetime.now(timezone.utc)
-
 from sqlalchemy import (
-    Boolean,
     Column,
     DateTime,
     ForeignKey,
@@ -24,8 +18,14 @@ from sqlalchemy import (
     String,
     Text,
     create_engine,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
+
+
+def _utc_now() -> datetime:
+    """Get current UTC time (timezone-aware)."""
+    return datetime.now(timezone.utc)
 
 
 class Base(DeclarativeBase):
@@ -137,20 +137,24 @@ class Event(Base):
         }
 
 
-# SQL for append-only trigger (to be executed separately)
-APPEND_ONLY_TRIGGER = """
+# Append-only enforcement for the audit log. Each entry is one statement:
+# the trigger bodies contain ';' themselves, so they cannot be split on it.
+APPEND_ONLY_TRIGGERS = (
+    """
 CREATE TRIGGER IF NOT EXISTS no_delete_events
 BEFORE DELETE ON events
 BEGIN
     SELECT RAISE(ABORT, 'Deletion not permitted on audit log');
-END;
-
+END
+""",
+    """
 CREATE TRIGGER IF NOT EXISTS no_update_events
 BEFORE UPDATE ON events
 BEGIN
     SELECT RAISE(ABORT, 'Updates not permitted on audit log');
-END;
-"""
+END
+""",
+)
 
 
 def init_db(db_path: str) -> None:
@@ -164,8 +168,6 @@ def init_db(db_path: str) -> None:
     Base.metadata.create_all(engine)
 
     # Add append-only triggers
-    with engine.connect() as conn:
-        for statement in APPEND_ONLY_TRIGGER.split(";"):
-            statement = statement.strip()
-            if statement:
-                conn.execute(statement)
+    with engine.begin() as conn:
+        for statement in APPEND_ONLY_TRIGGERS:
+            conn.execute(text(statement))

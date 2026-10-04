@@ -11,12 +11,9 @@ import pytest
 
 from sentinel.interceptor.descriptors import (
     DeviceDescriptor,
-    EndpointDescriptor,
-    InterfaceDescriptor,
     create_test_descriptor,
 )
 from sentinel.policy.engine import (
-    EvaluationResult,
     PolicyBuilder,
     PolicyEngine,
     RuleMatcher,
@@ -27,12 +24,10 @@ from sentinel.policy.models import Action, MatchCondition, Policy, PolicyRule, U
 from sentinel.policy.parser import (
     PolicyParseError,
     load_policy,
-    parse_match_condition,
     parse_policy,
     parse_rule,
     validate_policy,
 )
-
 
 # =============================================================================
 # Test Fixtures
@@ -256,6 +251,110 @@ class TestPolicyParser:
 # =============================================================================
 
 
+class TestStrictParsing:
+    """A match key the parser drops widens the rule to every device, so be strict."""
+
+    @pytest.mark.parametrize(
+        "match",
+        [
+            {"vendor": "046d"},  # typo of vid
+            {"vid": "046d", "is_keybaord": True},  # typo next to a valid key
+            {},  # empty match
+        ],
+    )
+    def test_rejects_matches_that_would_widen(self, match: dict) -> None:
+        with pytest.raises(PolicyParseError):
+            parse_rule({"match": match, "action": "allow"})
+
+    def test_rejects_unknown_rule_key(self) -> None:
+        with pytest.raises(PolicyParseError, match="Unknown rule key"):
+            parse_rule({"match": "*", "actoin": "allow", "action": "review"})
+
+    @pytest.mark.parametrize("vid", [1234, "46d", "zzzz", None])
+    def test_rejects_malformed_vid(self, vid: object) -> None:
+        with pytest.raises(PolicyParseError, match="vid"):
+            parse_rule({"match": {"vid": vid}, "action": "allow"})
+
+    def test_rejects_invalid_regex_at_load_time(self) -> None:
+        with pytest.raises(PolicyParseError, match="Invalid regex"):
+            parse_rule({"match": {"product": "(unclosed"}, "action": "block"})
+
+    def test_rejects_out_of_range_class(self) -> None:
+        with pytest.raises(PolicyParseError, match="out of range"):
+            parse_rule({"match": {"class": 256}, "action": "block"})
+
+    def test_null_string_means_missing(self) -> None:
+        rule = parse_rule({"match": {"manufacturer": None}, "action": "review"})
+        matcher = RuleMatcher()
+
+        anonymous = create_test_descriptor(manufacturer=None)
+        blank = create_test_descriptor(manufacturer="   ")
+        named = create_test_descriptor(manufacturer="Logitech")
+
+        assert matcher.matches(rule.match, anonymous)
+        assert matcher.matches(rule.match, blank)
+        assert not matcher.matches(rule.match, named)
+
+    def test_previously_ignored_keys_are_honored(self) -> None:
+        """These keys used to be dropped silently, matching every device."""
+        keyboard = create_test_descriptor(vid="1234", interfaces=[(0x03, 0x01, 0x01)])
+        mouse = create_test_descriptor(vid="1234", interfaces=[(0x03, 0x01, 0x02)])
+        matcher = RuleMatcher()
+
+        cases = {
+            "is_keyboard": True,
+            "interface_class": "HID",
+            "vid_list": ["046d", "1234"],
+            "interface_count_lt": 2,
+        }
+        for key, value in cases.items():
+            cond = parse_rule({"match": {key: value}, "action": "allow"}).match
+            assert matcher.matches(cond, keyboard), key
+
+        cond = parse_rule({"match": {"is_keyboard": True}, "action": "allow"}).match
+        assert not matcher.matches(cond, mouse)
+
+        cond = parse_rule({"match": {"vid_list": ["046d"]}, "action": "allow"}).match
+        assert not matcher.matches(cond, keyboard)
+
+    def test_vid_is_normalized_to_lowercase(self) -> None:
+        rule = parse_rule({"match": {"vid": "046D"}, "action": "allow"})
+        assert rule.match.vid == "046d"
+
+    def test_shipped_policy_loads_and_class_rules_are_reachable(self) -> None:
+        """`manufacturer: null` in config/policy.yaml used to shadow every later rule."""
+        policy_path = Path(__file__).parent.parent / "config" / "policy.yaml"
+        engine = PolicyEngine(policy=load_policy(policy_path))
+
+        audio = create_test_descriptor(
+            vid="0d8c",
+            pid="0014",
+            manufacturer="C-Media Electronics Inc.",
+            product="USB Audio Device",
+            interfaces=[(0x01, 0x01, 0x00)],
+        )
+        result = engine.evaluate(audio)
+        assert result.action == Action.ALLOW
+        assert result.matched_rule is not None
+        assert "Audio" in result.matched_rule.comment
+
+        anonymous = create_test_descriptor(
+            vid="0d8c", pid="0014", manufacturer=None, interfaces=[(0x01, 0x01, 0x00)]
+        )
+        result = engine.evaluate(anonymous)
+        assert result.matched_rule is not None
+        assert "Missing manufacturer" in result.matched_rule.comment
+
+    def test_update_rules_replaces_policy(self, policy_engine: PolicyEngine) -> None:
+        before = policy_engine.last_modified
+        policy_engine.update_rules([PolicyRule(MatchCondition(match_all=True), Action.BLOCK)])
+
+        assert len(policy_engine.policy.rules) == 1
+        assert policy_engine.last_modified >= before
+        device = create_test_descriptor()
+        assert policy_engine.evaluate(device).action == Action.BLOCK
+
+
 class TestPolicyValidation:
     """Tests for policy validation."""
 
@@ -268,32 +367,38 @@ class TestPolicyValidation:
 
     def test_validate_duplicate_vid_pid(self) -> None:
         """Test validation detects duplicate VID:PID."""
-        policy = Policy(rules=[
-            PolicyRule(MatchCondition(vid="046d", pid="c534"), Action.ALLOW),
-            PolicyRule(MatchCondition(vid="046d", pid="c534"), Action.BLOCK),
-        ])
+        policy = Policy(
+            rules=[
+                PolicyRule(MatchCondition(vid="046d", pid="c534"), Action.ALLOW),
+                PolicyRule(MatchCondition(vid="046d", pid="c534"), Action.BLOCK),
+            ]
+        )
         errors = validate_policy(policy)
 
         assert any("same VID:PID" in e for e in errors)
 
     def test_validate_invalid_regex(self) -> None:
         """Test validation detects invalid regex."""
-        policy = Policy(rules=[
-            PolicyRule(
-                MatchCondition(manufacturer="[invalid(regex"),
-                Action.REVIEW,
-            ),
-        ])
+        policy = Policy(
+            rules=[
+                PolicyRule(
+                    MatchCondition(manufacturer="[invalid(regex"),
+                    Action.REVIEW,
+                ),
+            ]
+        )
         errors = validate_policy(policy)
 
         assert any("Invalid regex" in e for e in errors)
 
     def test_validate_unreachable_rules(self) -> None:
         """Test validation detects unreachable rules."""
-        policy = Policy(rules=[
-            PolicyRule(MatchCondition(match_all=True), Action.REVIEW),
-            PolicyRule(MatchCondition(vid="046d"), Action.ALLOW),  # Unreachable
-        ])
+        policy = Policy(
+            rules=[
+                PolicyRule(MatchCondition(match_all=True), Action.REVIEW),
+                PolicyRule(MatchCondition(vid="046d"), Action.ALLOW),  # Unreachable
+            ]
+        )
         errors = validate_policy(policy)
 
         assert any("unreachable" in e.lower() for e in errors)
@@ -502,16 +607,18 @@ class TestPolicyEngine:
         assert len(engine.policy.rules) == 1
 
         # Update policy
-        policy_file.write_text(textwrap.dedent("""
+        policy_file.write_text(
+            textwrap.dedent("""
             rules:
               - match:
                   vid: '046d'
                 action: allow
               - match: '*'
                 action: block
-        """))
+        """)
+        )
 
-        errors = engine.reload_policy(policy_file)
+        engine.reload_policy(policy_file)
 
         assert len(engine.policy.rules) == 2
 
@@ -541,24 +648,14 @@ class TestPolicyBuilder:
 
     def test_build_class_rules(self) -> None:
         """Test building class-based rules."""
-        policy = (
-            PolicyBuilder()
-            .allow_class("Audio")
-            .block_class("Mass Storage")
-            .build()
-        )
+        policy = PolicyBuilder().allow_class("Audio").block_class("Mass Storage").build()
 
         assert len(policy.rules) == 2
         assert policy.rules[0].match.device_class == "Audio"
 
     def test_review_helpers(self) -> None:
         """Test review helper methods."""
-        policy = (
-            PolicyBuilder()
-            .review_first_seen()
-            .review_hid_with_storage()
-            .build()
-        )
+        policy = PolicyBuilder().review_first_seen().review_hid_with_storage().build()
 
         assert len(policy.rules) == 2
         assert policy.rules[0].match.first_seen is True
@@ -566,12 +663,7 @@ class TestPolicyBuilder:
 
     def test_build_engine(self) -> None:
         """Test building engine directly."""
-        engine = (
-            PolicyBuilder()
-            .allow("046d")
-            .default_review()
-            .build_engine()
-        )
+        engine = PolicyBuilder().allow("046d").default_review().build_engine()
 
         assert isinstance(engine, PolicyEngine)
         assert len(engine.policy.rules) == 2

@@ -79,10 +79,7 @@ class MatchCondition:
         """Check if any conditions are specified."""
         if self.match_all:
             return True
-        for key, value in self.__dict__.items():
-            if key != "match_all" and value is not None:
-                return True
-        return False
+        return any(key != "match_all" and value is not None for key, value in self.__dict__.items())
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary, excluding None values."""
@@ -100,7 +97,7 @@ class MatchCondition:
         return result
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "MatchCondition":
+    def from_dict(cls, data: dict[str, Any]) -> MatchCondition:
         """Create from dictionary."""
         if data == "*" or data.get("match") == "*":
             return cls(match_all=True)
@@ -171,9 +168,7 @@ class Policy:
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
-        return {
-            "rules": [rule.to_dict() for rule in self.rules]
-        }
+        return {"rules": [rule.to_dict() for rule in self.rules]}
 
 
 # USB Class code constants

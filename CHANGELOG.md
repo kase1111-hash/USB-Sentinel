@@ -8,13 +8,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Nothing yet
+- New devices stay unbound (`authorized_default=0`) until the daemon decides;
+  buses added later (docks) are covered too, and the previous setting is
+  restored on shutdown
+- Descriptors are read from sysfs, so unauthorized devices can be evaluated
+  without libusb and without talking to the device
+- Devices held for review (risk 51-75) stay unauthorized until an operator
+  runs `usb-sentinel devices trust`, which now also applies immediately to an
+  attached device
+- `usb-sentinel scan` previews decisions for attached devices
+- Policy reload on SIGHUP and on file change (`policy.hot_reload`), keeping the
+  previous policy if the new one is invalid; `usb-sentinel policy reload`
+- Webhook alerts for blocked and held devices
+- Benchmark that runs the daemon's real decision path with the shipped policy
 
 ### Changed
-- Nothing yet
+- Reviews are always scored by the descriptor validator and local heuristics;
+  the LLM is optional and can only raise a score
+- An `allow` rule is re-examined when the vendor string contradicts the VID
+- The policy parser rejects unknown keys, empty matches, unquoted numeric IDs
+  and invalid regexes; `manufacturer: null` means "no manufacturer string"
+- Default model is `claude-sonnet-5-5` (`claude-sonnet-4-20250514` is
+  deprecated); optional `analyzer.effort`
+- Installer uses a virtualenv; the udev RUN hook was removed
+- A missing `ANTHROPIC_API_KEY` is a warning, not a startup error
 
 ### Fixed
-- Nothing yet
+- The shipped policy's `manufacturer: null` rule matched every device, making
+  all later rules unreachable; keys the parser did not know were dropped,
+  widening rules to every device
+- 19 of 25 benchmark attack devices were authorized with the shipped config
+- The daemon exited on the first device removal or bind event
+- `devices trust` had no effect on decisions; `first_seen` rules always matched
+- The udev hook authorized every device when it could not reach the daemon
+- The systemd unit made `/sys` read-only, so no verdict could be enforced;
+  SIGHUP (ExecReload) killed the daemon; the PID file was never written
+- Device strings reached the LLM prompt unsanitized; responses that start with
+  a thinking block failed to parse
+- Audit log append-only triggers were never created
+- `PUT /api/policy` called a method that did not exist
+- `usb-sentinel policy test` crashed
+- Validator false positives on webcams (IAD class, zero-bandwidth alternate
+  settings) and on generic product names from verified vendors
 
 ## [0.1.0] - 2026-01-23
 

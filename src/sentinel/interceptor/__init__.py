@@ -6,15 +6,15 @@ before the operating system binds drivers.
 """
 
 from sentinel.interceptor.constants import (
-    USBClass,
     SecurityRisk,
+    USBClass,
     get_class_info,
     get_class_name,
     get_class_risk,
-    is_high_risk_class,
     get_vendor_info,
-    is_trusted_vendor,
+    is_high_risk_class,
     is_suspicious_vendor,
+    is_trusted_vendor,
 )
 from sentinel.interceptor.descriptors import (
     DeviceDescriptor,

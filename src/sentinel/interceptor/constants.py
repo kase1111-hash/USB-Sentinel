@@ -112,68 +112,49 @@ class ClassInfo(NamedTuple):
 # Comprehensive class information
 USB_CLASS_INFO: dict[int, ClassInfo] = {
     USBClass.PER_INTERFACE: ClassInfo(
-        0x00, "Per-Interface", SecurityRisk.MEDIUM,
-        "Class defined at interface level; inspect interfaces"
+        0x00,
+        "Per-Interface",
+        SecurityRisk.MEDIUM,
+        "Class defined at interface level; inspect interfaces",
     ),
     USBClass.AUDIO: ClassInfo(
-        0x01, "Audio", SecurityRisk.LOW,
-        "Audio devices (speakers, microphones)"
+        0x01, "Audio", SecurityRisk.LOW, "Audio devices (speakers, microphones)"
     ),
     USBClass.CDC_CONTROL: ClassInfo(
-        0x02, "Communications", SecurityRisk.MEDIUM,
-        "Modems, network adapters, serial ports"
+        0x02, "Communications", SecurityRisk.MEDIUM, "Modems, network adapters, serial ports"
     ),
     USBClass.HID: ClassInfo(
-        0x03, "HID", SecurityRisk.CRITICAL,
-        "Keyboards, mice - HIGH RISK for injection attacks"
+        0x03, "HID", SecurityRisk.CRITICAL, "Keyboards, mice - HIGH RISK for injection attacks"
     ),
-    USBClass.PHYSICAL: ClassInfo(
-        0x05, "Physical", SecurityRisk.LOW,
-        "Force feedback devices"
-    ),
+    USBClass.PHYSICAL: ClassInfo(0x05, "Physical", SecurityRisk.LOW, "Force feedback devices"),
     USBClass.IMAGE: ClassInfo(
-        0x06, "Image", SecurityRisk.MEDIUM,
-        "Cameras, scanners - data exfiltration risk"
+        0x06, "Image", SecurityRisk.MEDIUM, "Cameras, scanners - data exfiltration risk"
     ),
     USBClass.PRINTER: ClassInfo(
-        0x07, "Printer", SecurityRisk.MEDIUM,
-        "Printers - data exfiltration risk"
+        0x07, "Printer", SecurityRisk.MEDIUM, "Printers - data exfiltration risk"
     ),
     USBClass.MASS_STORAGE: ClassInfo(
-        0x08, "Mass Storage", SecurityRisk.CRITICAL,
-        "USB drives - HIGH RISK for malware delivery"
+        0x08, "Mass Storage", SecurityRisk.CRITICAL, "USB drives - HIGH RISK for malware delivery"
     ),
-    USBClass.HUB: ClassInfo(
-        0x09, "Hub", SecurityRisk.LOW,
-        "USB hubs - inspect child devices"
-    ),
+    USBClass.HUB: ClassInfo(0x09, "Hub", SecurityRisk.LOW, "USB hubs - inspect child devices"),
     USBClass.CDC_DATA: ClassInfo(
-        0x0A, "CDC-Data", SecurityRisk.MEDIUM,
-        "Data interface for CDC devices"
+        0x0A, "CDC-Data", SecurityRisk.MEDIUM, "Data interface for CDC devices"
     ),
     USBClass.SMART_CARD: ClassInfo(
-        0x0B, "Smart Card", SecurityRisk.HIGH,
-        "Smart card readers - credential access"
+        0x0B, "Smart Card", SecurityRisk.HIGH, "Smart card readers - credential access"
     ),
-    USBClass.VIDEO: ClassInfo(
-        0x0E, "Video", SecurityRisk.MEDIUM,
-        "Webcams - privacy risk"
-    ),
+    USBClass.VIDEO: ClassInfo(0x0E, "Video", SecurityRisk.MEDIUM, "Webcams - privacy risk"),
     USBClass.WIRELESS_CONTROLLER: ClassInfo(
-        0xE0, "Wireless", SecurityRisk.HIGH,
-        "Bluetooth/WiFi adapters - network attack risk"
+        0xE0, "Wireless", SecurityRisk.HIGH, "Bluetooth/WiFi adapters - network attack risk"
     ),
     USBClass.MISCELLANEOUS: ClassInfo(
-        0xEF, "Miscellaneous", SecurityRisk.MEDIUM,
-        "Composite devices - inspect all interfaces"
+        0xEF, "Miscellaneous", SecurityRisk.MEDIUM, "Composite devices - inspect all interfaces"
     ),
     USBClass.APPLICATION_SPECIFIC: ClassInfo(
-        0xFE, "Application Specific", SecurityRisk.HIGH,
-        "DFU, IRDA - firmware update risk"
+        0xFE, "Application Specific", SecurityRisk.HIGH, "DFU, IRDA - firmware update risk"
     ),
     USBClass.VENDOR_SPECIFIC: ClassInfo(
-        0xFF, "Vendor Specific", SecurityRisk.HIGH,
-        "Unknown functionality - requires analysis"
+        0xFF, "Vendor Specific", SecurityRisk.HIGH, "Unknown functionality - requires analysis"
     ),
 }
 
@@ -214,26 +195,18 @@ TRUSTED_VENDORS: dict[str, VendorInfo] = {
 
 # Vendors commonly associated with attack hardware
 SUSPICIOUS_VENDORS: dict[str, VendorInfo] = {
-    "1a86": VendorInfo("1a86", "QinHeng Electronics", False,
-                       "CH340 - common in DIY attack hardware"),
-    "0483": VendorInfo("0483", "STMicroelectronics", False,
-                       "STM32 - used in Rubber Ducky, BadUSB"),
-    "03eb": VendorInfo("03eb", "Atmel", False,
-                       "AVR/SAM - used in Rubber Ducky, Teensy"),
-    "16c0": VendorInfo("16c0", "Van Ooijen Technische Informatica", False,
-                       "Teensy, PJRC devices"),
-    "1781": VendorInfo("1781", "Multiple", False,
-                       "Digispark, various DIY devices"),
-    "1d50": VendorInfo("1d50", "OpenMoko", False,
-                       "Open source hardware, various tools"),
-    "2341": VendorInfo("2341", "Arduino", False,
-                       "Arduino - can be used for HID attacks"),
-    "1b4f": VendorInfo("1b4f", "SparkFun", False,
-                       "SparkFun Pro Micro - HID capable"),
-    "239a": VendorInfo("239a", "Adafruit", False,
-                       "Adafruit boards - HID capable"),
-    "0525": VendorInfo("0525", "Netchip/PLX", False,
-                       "USB gadget mode - various attack tools"),
+    "1a86": VendorInfo(
+        "1a86", "QinHeng Electronics", False, "CH340 - common in DIY attack hardware"
+    ),
+    "0483": VendorInfo("0483", "STMicroelectronics", False, "STM32 - used in Rubber Ducky, BadUSB"),
+    "03eb": VendorInfo("03eb", "Atmel", False, "AVR/SAM - used in Rubber Ducky, Teensy"),
+    "16c0": VendorInfo("16c0", "Van Ooijen Technische Informatica", False, "Teensy, PJRC devices"),
+    "1781": VendorInfo("1781", "Multiple", False, "Digispark, various DIY devices"),
+    "1d50": VendorInfo("1d50", "OpenMoko", False, "Open source hardware, various tools"),
+    "2341": VendorInfo("2341", "Arduino", False, "Arduino - can be used for HID attacks"),
+    "1b4f": VendorInfo("1b4f", "SparkFun", False, "SparkFun Pro Micro - HID capable"),
+    "239a": VendorInfo("239a", "Adafruit", False, "Adafruit boards - HID capable"),
+    "0525": VendorInfo("0525", "Netchip/PLX", False, "USB gadget mode - various attack tools"),
 }
 
 

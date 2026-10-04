@@ -20,7 +20,6 @@ from datetime import datetime, timezone
 
 from fastapi.testclient import TestClient
 
-
 # ============================================================================
 # Layer Integration Tests
 # ============================================================================
@@ -183,7 +182,7 @@ class TestAuditDatabaseIntegration(unittest.TestCase):
 
     def test_statistics(self) -> None:
         """Test statistics retrieval."""
-        from sentinel.audit import AuditDatabase, Device, Event, EventType, TrustLevel
+        from sentinel.audit import AuditDatabase, Device, TrustLevel
 
         db = AuditDatabase(self.db_path)
 
