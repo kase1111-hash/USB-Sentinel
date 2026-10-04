@@ -90,6 +90,15 @@ ignore = [
     "E501",   # line too long (handled by formatter)
 ]
 
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI dependency markers are meant to be used as argument defaults.
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.Security",
+    "sentinel.api.auth.require_permission",
+]
+
 [tool.ruff.lint.isort]
 known-first-party = ["sentinel"]
 

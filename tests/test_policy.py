@@ -11,12 +11,9 @@ import pytest
 
 from sentinel.interceptor.descriptors import (
     DeviceDescriptor,
-    EndpointDescriptor,
-    InterfaceDescriptor,
     create_test_descriptor,
 )
 from sentinel.policy.engine import (
-    EvaluationResult,
     PolicyBuilder,
     PolicyEngine,
     RuleMatcher,
@@ -27,12 +24,10 @@ from sentinel.policy.models import Action, MatchCondition, Policy, PolicyRule, U
 from sentinel.policy.parser import (
     PolicyParseError,
     load_policy,
-    parse_match_condition,
     parse_policy,
     parse_rule,
     validate_policy,
 )
-
 
 # =============================================================================
 # Test Fixtures
@@ -268,32 +263,38 @@ class TestPolicyValidation:
 
     def test_validate_duplicate_vid_pid(self) -> None:
         """Test validation detects duplicate VID:PID."""
-        policy = Policy(rules=[
-            PolicyRule(MatchCondition(vid="046d", pid="c534"), Action.ALLOW),
-            PolicyRule(MatchCondition(vid="046d", pid="c534"), Action.BLOCK),
-        ])
+        policy = Policy(
+            rules=[
+                PolicyRule(MatchCondition(vid="046d", pid="c534"), Action.ALLOW),
+                PolicyRule(MatchCondition(vid="046d", pid="c534"), Action.BLOCK),
+            ]
+        )
         errors = validate_policy(policy)
 
         assert any("same VID:PID" in e for e in errors)
 
     def test_validate_invalid_regex(self) -> None:
         """Test validation detects invalid regex."""
-        policy = Policy(rules=[
-            PolicyRule(
-                MatchCondition(manufacturer="[invalid(regex"),
-                Action.REVIEW,
-            ),
-        ])
+        policy = Policy(
+            rules=[
+                PolicyRule(
+                    MatchCondition(manufacturer="[invalid(regex"),
+                    Action.REVIEW,
+                ),
+            ]
+        )
         errors = validate_policy(policy)
 
         assert any("Invalid regex" in e for e in errors)
 
     def test_validate_unreachable_rules(self) -> None:
         """Test validation detects unreachable rules."""
-        policy = Policy(rules=[
-            PolicyRule(MatchCondition(match_all=True), Action.REVIEW),
-            PolicyRule(MatchCondition(vid="046d"), Action.ALLOW),  # Unreachable
-        ])
+        policy = Policy(
+            rules=[
+                PolicyRule(MatchCondition(match_all=True), Action.REVIEW),
+                PolicyRule(MatchCondition(vid="046d"), Action.ALLOW),  # Unreachable
+            ]
+        )
         errors = validate_policy(policy)
 
         assert any("unreachable" in e.lower() for e in errors)
@@ -502,16 +503,18 @@ class TestPolicyEngine:
         assert len(engine.policy.rules) == 1
 
         # Update policy
-        policy_file.write_text(textwrap.dedent("""
+        policy_file.write_text(
+            textwrap.dedent("""
             rules:
               - match:
                   vid: '046d'
                 action: allow
               - match: '*'
                 action: block
-        """))
+        """)
+        )
 
-        errors = engine.reload_policy(policy_file)
+        engine.reload_policy(policy_file)
 
         assert len(engine.policy.rules) == 2
 
@@ -541,24 +544,14 @@ class TestPolicyBuilder:
 
     def test_build_class_rules(self) -> None:
         """Test building class-based rules."""
-        policy = (
-            PolicyBuilder()
-            .allow_class("Audio")
-            .block_class("Mass Storage")
-            .build()
-        )
+        policy = PolicyBuilder().allow_class("Audio").block_class("Mass Storage").build()
 
         assert len(policy.rules) == 2
         assert policy.rules[0].match.device_class == "Audio"
 
     def test_review_helpers(self) -> None:
         """Test review helper methods."""
-        policy = (
-            PolicyBuilder()
-            .review_first_seen()
-            .review_hid_with_storage()
-            .build()
-        )
+        policy = PolicyBuilder().review_first_seen().review_hid_with_storage().build()
 
         assert len(policy.rules) == 2
         assert policy.rules[0].match.first_seen is True
@@ -566,12 +559,7 @@ class TestPolicyBuilder:
 
     def test_build_engine(self) -> None:
         """Test building engine directly."""
-        engine = (
-            PolicyBuilder()
-            .allow("046d")
-            .default_review()
-            .build_engine()
-        )
+        engine = PolicyBuilder().allow("046d").default_review().build_engine()
 
         assert isinstance(engine, PolicyEngine)
         assert len(engine.policy.rules) == 2

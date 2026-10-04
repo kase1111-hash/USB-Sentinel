@@ -10,13 +10,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
-
-def _utc_now() -> datetime:
-    """Get current UTC time (timezone-aware)."""
-    return datetime.now(timezone.utc)
-
 from sqlalchemy import (
-    Boolean,
     Column,
     DateTime,
     ForeignKey,
@@ -26,6 +20,11 @@ from sqlalchemy import (
     create_engine,
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
+
+
+def _utc_now() -> datetime:
+    """Get current UTC time (timezone-aware)."""
+    return datetime.now(timezone.utc)
 
 
 class Base(DeclarativeBase):

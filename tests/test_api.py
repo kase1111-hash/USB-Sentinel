@@ -10,40 +10,33 @@ import asyncio
 import json
 import time
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
-from fastapi import status
 from fastapi.testclient import TestClient
 
 from sentinel.api import (
-    APIKey,
-    APIKeyManager,
     ActionType,
     AnalysisRequest,
+    APIKey,
+    APIKeyManager,
     ConnectionManager,
     DeviceResponse,
     DeviceUpdateRequest,
     EventResponse,
     EventType,
-    HealthCheck,
     MatchConditionSchema,
     PolicyRuleSchema,
-    PolicySchema,
     PolicyValidationResult,
     RateLimiter,
-    SystemStatistics,
     TrustLevel,
     WebSocketEventType,
     WebSocketMessage,
-    app,
-    configure_services,
     create_app,
     generate_api_key,
     key_manager,
 )
 from sentinel.api.auth import TokenBucket, hash_api_key, verify_api_key
-
 
 # ============================================================================
 # Test Fixtures

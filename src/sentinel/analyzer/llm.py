@@ -11,7 +11,6 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
 from typing import Any, Protocol
 
 from sentinel.analyzer.prompts import (
@@ -25,7 +24,6 @@ from sentinel.analyzer.prompts import (
 )
 from sentinel.analyzer.scoring import AnalysisResult, Verdict
 from sentinel.interceptor.descriptors import DeviceDescriptor
-
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +112,7 @@ class RetryConfig:
 
     def get_delay(self, attempt: int) -> float:
         """Get delay for a given attempt number."""
-        delay = self.base_delay * (self.exponential_base ** attempt)
+        delay = self.base_delay * (self.exponential_base**attempt)
         return min(delay, self.max_delay)
 
 
@@ -177,6 +175,7 @@ class LLMAnalyzer:
         """
         try:
             import anthropic
+
             self.client = anthropic.Anthropic(api_key=api_key)
         except ImportError:
             logger.error("anthropic package not installed")
@@ -196,15 +195,10 @@ class LLMAnalyzer:
         self.stats = AnalyzerStats()
 
         # Analysis queue for async processing
-        self._queue: asyncio.Queue[tuple[DeviceDescriptor, asyncio.Future]] = (
-            asyncio.Queue()
-        )
+        self._queue: asyncio.Queue[tuple[DeviceDescriptor, asyncio.Future]] = asyncio.Queue()
         self._worker_task: asyncio.Task | None = None
 
-        logger.info(
-            "LLM Analyzer initialized: model=%s, rate_limit=%d/min",
-            model, rate_limit
-        )
+        logger.info("LLM Analyzer initialized: model=%s, rate_limit=%d/min", model, rate_limit)
 
     def _create_message(
         self,
@@ -289,7 +283,8 @@ class LLMAnalyzer:
                 if parsed is None:
                     logger.warning(
                         "Invalid LLM response format, attempt %d: %s",
-                        attempt + 1, response_text[:200]
+                        attempt + 1,
+                        response_text[:200],
                     )
                     raise ValueError("Invalid response format from LLM")
 
@@ -308,8 +303,11 @@ class LLMAnalyzer:
 
                 logger.info(
                     "Device %s:%s analyzed: score=%d, verdict=%s (%.0fms)",
-                    device.vid, device.pid, result.risk_score,
-                    result.verdict.value, latency
+                    device.vid,
+                    device.pid,
+                    result.risk_score,
+                    result.verdict.value,
+                    latency,
                 )
 
                 return result
@@ -320,14 +318,17 @@ class LLMAnalyzer:
                     delay = self.retry_config.get_delay(attempt)
                     logger.warning(
                         "Analysis attempt %d failed: %s, retrying in %.1fs",
-                        attempt + 1, str(e), delay
+                        attempt + 1,
+                        str(e),
+                        delay,
                     )
                     self.stats.retries += 1
                     time.sleep(delay)
                 else:
                     logger.error(
                         "Analysis failed after %d attempts: %s",
-                        self.retry_config.max_retries + 1, str(e)
+                        self.retry_config.max_retries + 1,
+                        str(e),
                     )
 
         self.stats.failed_requests += 1
@@ -353,8 +354,7 @@ class LLMAnalyzer:
         # Run in thread pool to avoid blocking
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
-            None,
-            lambda: self.analyze(device, history, similar_devices)
+            None, lambda: self.analyze(device, history, similar_devices)
         )
 
     def analyze_behavior(

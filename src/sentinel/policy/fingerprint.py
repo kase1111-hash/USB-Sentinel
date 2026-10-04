@@ -126,9 +126,7 @@ class FingerprintGenerator:
             components.append(f"class:{descriptor.device_class}")
 
             # Add interface classes (sorted for stability)
-            interface_classes = sorted(
-                intf.interface_class for intf in descriptor.interfaces
-            )
+            interface_classes = sorted(intf.interface_class for intf in descriptor.interfaces)
             components.append(f"ifaces:{','.join(map(str, interface_classes))}")
 
             # Add manufacturer and product strings (normalized)
@@ -137,10 +135,9 @@ class FingerprintGenerator:
             if descriptor.product:
                 components.append(f"prod:{self._normalize(descriptor.product)}")
 
-        if self.mode == self.MODE_STRICT:
-            # Add serial number for unique instance identification
-            if descriptor.serial:
-                components.append(f"serial:{descriptor.serial}")
+        # Add serial number for unique instance identification
+        if self.mode == self.MODE_STRICT and descriptor.serial:
+            components.append(f"serial:{descriptor.serial}")
 
         return components
 

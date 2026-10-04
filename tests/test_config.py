@@ -12,8 +12,6 @@ import yaml
 from sentinel.config import (
     AnalyzerConfig,
     APIConfig,
-    DaemonConfig,
-    DatabaseConfig,
     SentinelConfig,
     load_config,
     validate_config,
@@ -151,9 +149,7 @@ class TestAnalyzerConfig:
         config = AnalyzerConfig()
         assert config.api_key == "test-key-123"
 
-    def test_api_key_explicit_overrides_env(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_api_key_explicit_overrides_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test explicit API key overrides environment."""
         monkeypatch.setenv("ANTHROPIC_API_KEY", "env-key")
 

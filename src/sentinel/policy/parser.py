@@ -142,7 +142,9 @@ def parse_match_condition(data: Any) -> MatchCondition:
         if class_code is None:
             # Try parsing as hex
             try:
-                class_code = int(device_class, 16) if device_class.startswith("0x") else int(device_class)
+                class_code = (
+                    int(device_class, 16) if device_class.startswith("0x") else int(device_class)
+                )
             except ValueError:
                 raise PolicyParseError(f"Unknown device class: {device_class}")
         device_class = class_code
@@ -182,9 +184,7 @@ def validate_policy(policy: Policy) -> list[str]:
     for i, rule in enumerate(policy.rules):
         key = (rule.match.vid, rule.match.pid)
         if key != (None, None) and key in vid_pid_rules:
-            errors.append(
-                f"Warning: Rule {i} has same VID:PID as rule {vid_pid_rules[key]}"
-            )
+            errors.append(f"Warning: Rule {i} has same VID:PID as rule {vid_pid_rules[key]}")
         vid_pid_rules[key] = i
 
     # Check regex patterns are valid

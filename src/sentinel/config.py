@@ -13,7 +13,6 @@ from typing import Any
 
 import yaml
 
-
 # Default configuration paths
 DEFAULT_CONFIG_PATH = Path("/etc/usb-sentinel/sentinel.yaml")
 DEFAULT_POLICY_PATH = Path("/etc/usb-sentinel/policy.yaml")
@@ -250,10 +249,7 @@ def validate_config(config: SentinelConfig) -> list[str]:
 
     for origin in config.api.cors_origins:
         if not origin.startswith(("http://", "https://")):
-            errors.append(
-                f"Invalid CORS origin: {origin!r} "
-                "(must start with http:// or https://)"
-            )
+            errors.append(f"Invalid CORS origin: {origin!r} (must start with http:// or https://)")
 
     # --- Alerts ---
     if not (0 <= config.alerts.threshold <= 100):
@@ -262,16 +258,11 @@ def validate_config(config: SentinelConfig) -> list[str]:
     if config.alerts.methods.webhook:
         url = config.alerts.methods.webhook
         if not url.startswith(("http://", "https://")):
-            errors.append(
-                f"Invalid webhook URL: {url!r} "
-                "(must start with http:// or https://)"
-            )
+            errors.append(f"Invalid webhook URL: {url!r} (must start with http:// or https://)")
 
     # --- Database: check parent directory is writable ---
     db_parent = Path(config.database.path).parent
     if db_parent.exists() and not os.access(db_parent, os.W_OK):
-        errors.append(
-            f"Database directory not writable: {db_parent}"
-        )
+        errors.append(f"Database directory not writable: {db_parent}")
 
     return errors

@@ -25,9 +25,7 @@ from sentinel.analyzer.llm import LLMAnalyzer, MockLLMAnalyzer
 from sentinel.analyzer.scoring import AnalysisResult, score_to_action
 from sentinel.audit.database import AuditDatabase
 from sentinel.config import SentinelConfig, load_config, validate_config
-from sentinel.interceptor.descriptors import DeviceDescriptor
 from sentinel.interceptor.linux import (
-    EventType,
     USBEvent,
     USBInterceptor,
     get_platform_interceptor,
@@ -100,6 +98,7 @@ class SentinelDaemon:
             except Exception as e:
                 logger.warning("Database init failed (%s), retrying...", e)
                 import time
+
                 time.sleep(0.5)
                 self._db = AuditDatabase(str(db_path))
         return self._db
@@ -120,21 +119,20 @@ class SentinelDaemon:
                 except Exception as e:
                     logger.error(
                         "Failed to load policy %s: %s — using built-in default policy",
-                        policy_path, e,
+                        policy_path,
+                        e,
                     )
                     from sentinel.policy.engine import create_default_policy
-                    self._policy_engine = PolicyEngine(
-                        policy=create_default_policy()
-                    )
+
+                    self._policy_engine = PolicyEngine(policy=create_default_policy())
             else:
                 logger.warning(
                     "Policy file not found: %s — using built-in default policy",
                     policy_path,
                 )
                 from sentinel.policy.engine import create_default_policy
-                self._policy_engine = PolicyEngine(
-                    policy=create_default_policy()
-                )
+
+                self._policy_engine = PolicyEngine(policy=create_default_policy())
         return self._policy_engine
 
     @property
@@ -158,9 +156,7 @@ class SentinelDaemon:
                     )
                     self._analyzer = MockLLMAnalyzer()
             else:
-                logger.warning(
-                    "No API key configured, using local heuristic analyzer"
-                )
+                logger.warning("No API key configured, using local heuristic analyzer")
                 self._analyzer = MockLLMAnalyzer()
         return self._analyzer
 
@@ -216,6 +212,7 @@ class SentinelDaemon:
         if self._api_server is not None:
             self._api_server.should_exit = True
             from sentinel.api.websocket import shutdown_websocket
+
             await shutdown_websocket()
 
         # Clean up interceptor
@@ -271,7 +268,8 @@ class SentinelDaemon:
 
             logger.info(
                 "Processing device: %s:%s (%s)",
-                descriptor.vid, descriptor.pid,
+                descriptor.vid,
+                descriptor.pid,
                 descriptor.product or "Unknown",
             )
 
@@ -311,7 +309,8 @@ class SentinelDaemon:
                     result["action"] = action.value
                     logger.info(
                         "LLM verdict: %s (risk_score: %s)",
-                        action.value, analysis_result.risk_score,
+                        action.value,
+                        analysis_result.risk_score,
                     )
                 except Exception as e:
                     logger.warning("LLM analysis failed: %s, trying local fallback", e)
@@ -424,7 +423,8 @@ class SentinelDaemon:
         """Send alert notification for blocked device."""
         descriptor = event.descriptor
         message = "USB Device Blocked: %s:%s (%s)" % (
-            descriptor.vid, descriptor.pid,
+            descriptor.vid,
+            descriptor.pid,
             descriptor.product or "Unknown",
         )
 
@@ -532,22 +532,26 @@ def main(argv: list[str] | None = None) -> int:
         description="USB Sentinel daemon process",
     )
     parser.add_argument(
-        "-V", "--version",
+        "-V",
+        "--version",
         action="version",
         version=f"%(prog)s {__version__}",
     )
     parser.add_argument(
-        "-c", "--config",
+        "-c",
+        "--config",
         metavar="FILE",
         help="Path to configuration file",
     )
     parser.add_argument(
-        "-f", "--foreground",
+        "-f",
+        "--foreground",
         action="store_true",
         help="Run in foreground (don't daemonize)",
     )
     parser.add_argument(
-        "-v", "--verbose",
+        "-v",
+        "--verbose",
         action="store_true",
         help="Enable verbose logging",
     )

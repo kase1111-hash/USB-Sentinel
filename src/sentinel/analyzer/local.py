@@ -18,12 +18,10 @@ from sentinel.analyzer.prompts import (
     build_history_context,
     check_vendor_mismatch,
     format_device_prompt,
-    sanitize_device_strings,
     validate_response,
 )
 from sentinel.analyzer.scoring import AnalysisResult, Verdict
 from sentinel.interceptor.descriptors import DeviceDescriptor
-
 
 logger = logging.getLogger(__name__)
 
@@ -68,12 +66,12 @@ class LocalLLMAnalyzer:
 
         try:
             from llama_cpp import Llama
+
             self._llm_class = Llama
-        except ImportError:
+        except ImportError as e:
             raise RuntimeError(
-                "llama-cpp-python not installed. Install with: "
-                "pip install llama-cpp-python"
-            )
+                "llama-cpp-python not installed. Install with: pip install llama-cpp-python"
+            ) from e
 
         # Lazy initialization of model
         self._model: Any = None
@@ -87,7 +85,9 @@ class LocalLLMAnalyzer:
 
         logger.info(
             "Local LLM Analyzer configured: model=%s, n_ctx=%d, gpu_layers=%d",
-            config.model_path, config.n_ctx, config.n_gpu_layers
+            config.model_path,
+            config.n_ctx,
+            config.n_gpu_layers,
         )
 
     def _ensure_initialized(self) -> None:
@@ -190,8 +190,11 @@ class LocalLLMAnalyzer:
 
             logger.info(
                 "Local analysis for %s:%s: score=%d, verdict=%s (%.0fms)",
-                device.vid, device.pid, result.risk_score,
-                result.verdict.value, latency
+                device.vid,
+                device.pid,
+                result.risk_score,
+                result.verdict.value,
+                latency,
             )
 
             return result
@@ -279,10 +282,10 @@ class LocalLLMAnalyzer:
         Note: Local LLM is CPU-bound, so this runs in executor.
         """
         import asyncio
+
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
-            None,
-            lambda: self.analyze(device, history, similar_devices)
+            None, lambda: self.analyze(device, history, similar_devices)
         )
 
     def get_statistics(self) -> dict[str, Any]:
@@ -363,10 +366,7 @@ class HybridAnalyzer:
             return self.primary.analyze(device, history, similar_devices)
         except Exception as e:
             self._primary_failures += 1
-            logger.warning(
-                "Primary analyzer failed (%s), using fallback",
-                str(e)
-            )
+            logger.warning("Primary analyzer failed (%s), using fallback", str(e))
 
             if self.fallback_on_error:
                 self._fallback_uses += 1
@@ -388,9 +388,7 @@ class HybridAnalyzer:
 
             if self.fallback_on_error:
                 self._fallback_uses += 1
-                return await self.fallback.analyze_async(
-                    device, history, similar_devices
-                )
+                return await self.fallback.analyze_async(device, history, similar_devices)
             raise
 
     def get_statistics(self) -> dict[str, Any]:

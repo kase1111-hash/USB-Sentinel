@@ -13,9 +13,8 @@ from typing import Any
 
 from sentinel.interceptor.descriptors import DeviceDescriptor
 
-
 # Constitutional system prompt establishing LLM behavior boundaries
-SYSTEM_PROMPT = '''You are a USB security analyst agent. Your role is to evaluate USB device descriptors for potential security threats.
+SYSTEM_PROMPT = """You are a USB security analyst agent. Your role is to evaluate USB device descriptors for potential security threats.
 
 ## Constitutional Bounds
 
@@ -71,11 +70,11 @@ You MUST adhere to these inviolable rules:
   "confidence": <float 0.0-1.0>,
   "threat_indicators": ["indicator1", "indicator2"]
 }
-```'''
+```"""
 
 
 # Prompt template for device analysis
-DEVICE_ANALYSIS_PROMPT = '''Analyze this USB device for security threats:
+DEVICE_ANALYSIS_PROMPT = """Analyze this USB device for security threats:
 
 ## Device Information
 
@@ -112,11 +111,11 @@ Evaluate this device considering:
 3. Does the vendor information match expected patterns for VID {vid}?
 4. Are there indicators of BadUSB, keystroke injection, or data exfiltration?
 
-Provide your risk assessment in the required JSON format.'''
+Provide your risk assessment in the required JSON format."""
 
 
 # Prompt for analyzing device behavior patterns
-BEHAVIOR_ANALYSIS_PROMPT = '''Analyze this USB device behavioral data for anomalies:
+BEHAVIOR_ANALYSIS_PROMPT = """Analyze this USB device behavioral data for anomalies:
 
 ## Device
 - VID:PID: {vid}:{pid}
@@ -144,7 +143,7 @@ Evaluate whether this traffic pattern indicates:
 3. Potential data exfiltration via HID
 4. Re-enumeration attempts
 
-Provide your risk assessment in the required JSON format.'''
+Provide your risk assessment in the required JSON format."""
 
 
 def format_device_prompt(
@@ -266,19 +265,19 @@ def sanitize_input(text: str) -> str:
     text = text[:1000]
 
     # Remove control characters except common whitespace
-    text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', text)
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]", "", text)
 
     # Escape patterns that could be prompt injection attempts
     injection_patterns = [
-        (r'```', '`​`​`'),  # Code blocks with zero-width spaces
-        (r'\[INST\]', '[​INST]'),  # Instruction markers
-        (r'\[/INST\]', '[/​INST]'),
-        (r'<\|.*?\|>', ''),  # Special tokens
-        (r'###\s*(System|User|Assistant)', '### \\1'),  # Role markers
-        (r'Human:', 'Human​:'),  # Claude-specific
-        (r'Assistant:', 'Assistant​:'),
-        (r'IGNORE\s+(PREVIOUS|ABOVE|ALL)', ''),  # Direct injection attempts
-        (r'(forget|ignore|disregard)\s+(everything|all|previous)', ''),
+        (r"```", "`​`​`"),  # Code blocks with zero-width spaces
+        (r"\[INST\]", "[​INST]"),  # Instruction markers
+        (r"\[/INST\]", "[/​INST]"),
+        (r"<\|.*?\|>", ""),  # Special tokens
+        (r"###\s*(System|User|Assistant)", "### \\1"),  # Role markers
+        (r"Human:", "Human​:"),  # Claude-specific
+        (r"Assistant:", "Assistant​:"),
+        (r"IGNORE\s+(PREVIOUS|ABOVE|ALL)", ""),  # Direct injection attempts
+        (r"(forget|ignore|disregard)\s+(everything|all|previous)", ""),
     ]
 
     for pattern, replacement in injection_patterns:
@@ -318,7 +317,7 @@ def validate_response(response_text: str) -> dict[str, Any] | None:
     """
     # Try to extract JSON from response
     # Sometimes LLMs add markdown code blocks
-    json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response_text, re.DOTALL)
+    json_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", response_text, re.DOTALL)
     if json_match:
         response_text = json_match.group(1)
     else:

@@ -4,8 +4,6 @@ Tests for USB Interceptor module.
 
 from __future__ import annotations
 
-import asyncio
-from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -42,10 +40,7 @@ class TestDeviceDescriptor:
                 interface_subclass=intf["interface_subclass"],
                 interface_protocol=intf["interface_protocol"],
                 num_endpoints=intf["num_endpoints"],
-                endpoints=[
-                    EndpointDescriptor(**ep)
-                    for ep in intf.get("endpoints", [])
-                ],
+                endpoints=[EndpointDescriptor(**ep) for ep in intf.get("endpoints", [])],
             )
             for intf in sample_device_descriptor["interfaces"]
         ]
@@ -363,7 +358,7 @@ class TestUSBEnumerator:
         with patch("usb.core.find") as mock_find:
             mock_find.side_effect = Exception("No backend available")
 
-            with pytest.raises(Exception):
+            with pytest.raises(Exception, match="No backend available"):
                 enumerator.enumerate_all()
 
     def test_enumerate_all_empty(self) -> None:
@@ -383,9 +378,7 @@ class TestDeviceAuthorizer:
         """Test getting path for non-existent device."""
         authorizer = DeviceAuthorizer()
 
-        with patch.object(
-            DeviceAuthorizer, "SYSFS_USB_PATH", temp_dir
-        ):
+        with patch.object(DeviceAuthorizer, "SYSFS_USB_PATH", temp_dir):
             path = authorizer._get_device_path(99, 99)
             assert path is None
 

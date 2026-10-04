@@ -8,19 +8,19 @@ Provides real-time monitoring and device blocking capabilities.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import AsyncIterator, Callable
 
 import usb.core
 import usb.util
 
 from sentinel.interceptor.descriptors import DeviceDescriptor, extract_device_info
-
 
 logger = logging.getLogger(__name__)
 
@@ -79,8 +79,7 @@ class USBEnumerator:
                     devices.append(descriptor)
                 except usb.core.USBError as e:
                     logger.warning(
-                        "Failed to read device %04x:%04x: %s",
-                        dev.idVendor, dev.idProduct, e
+                        "Failed to read device %04x:%04x: %s", dev.idVendor, dev.idProduct, e
                     )
                 except Exception as e:
                     logger.error("Error extracting device info: %s", e)
@@ -122,10 +121,8 @@ class USBEnumerator:
         """
         devices = []
         for dev in usb.core.find(find_all=True, idVendor=vid, idProduct=pid):
-            try:
+            with contextlib.suppress(usb.core.USBError):
                 devices.append(extract_device_info(dev))
-            except usb.core.USBError:
-                pass
         return devices
 
 
@@ -146,12 +143,14 @@ class USBMonitor:
         """Initialize pyudev context if needed."""
         if self._context is None:
             import pyudev
+
             self._context = pyudev.Context()
 
     def _ensure_monitor(self) -> None:
         """Initialize pyudev monitor if needed."""
         if self._monitor is None:
             import pyudev
+
             self._ensure_context()
             self._monitor = pyudev.Monitor.from_netlink(self._context)
             self._monitor.filter_by(subsystem="usb", device_type="usb_device")
@@ -217,7 +216,6 @@ class USBMonitor:
         Yields:
             USBEvent for each device add/remove event.
         """
-        import pyudev
 
         self._ensure_monitor()
         self._running = True
@@ -270,9 +268,7 @@ class DeviceAuthorizer:
     def _check_permissions(self) -> None:
         """Check if we have permission to control device authorization."""
         if os.geteuid() != 0:
-            logger.warning(
-                "Not running as root. Device authorization control may not work."
-            )
+            logger.warning("Not running as root. Device authorization control may not work.")
 
     def _get_device_path(self, bus: int, address: int) -> Path | None:
         """
@@ -300,7 +296,7 @@ class DeviceAuthorizer:
                     current_addr = int(devnum_file.read_text().strip())
                     if current_bus == bus and current_addr == address:
                         return device_dir
-                except (ValueError, IOError):
+                except (OSError, ValueError):
                     continue
         return None
 
@@ -333,7 +329,7 @@ class DeviceAuthorizer:
         try:
             value = auth_file.read_text().strip()
             return value == "1"
-        except IOError:
+        except OSError:
             return None
 
     def authorize(self, bus: int, address: int) -> bool:
@@ -387,16 +383,16 @@ class DeviceAuthorizer:
         try:
             auth_file.write_text("1" if authorized else "0")
             logger.info(
-                "Device %d:%d %s",
-                bus, address,
-                "authorized" if authorized else "deauthorized"
+                "Device %d:%d %s", bus, address, "authorized" if authorized else "deauthorized"
             )
             return True
-        except IOError as e:
+        except OSError as e:
             logger.error(
                 "Failed to %s device %d:%d: %s",
                 "authorize" if authorized else "deauthorize",
-                bus, address, e
+                bus,
+                address,
+                e,
             )
             return False
 
@@ -409,7 +405,7 @@ class DeviceAuthorizer:
         try:
             auth_file.write_text("1")
             return True
-        except IOError:
+        except OSError:
             return False
 
     def deauthorize_by_syspath(self, sys_path: str) -> bool:
@@ -421,7 +417,7 @@ class DeviceAuthorizer:
         try:
             auth_file.write_text("0")
             return True
-        except IOError:
+        except OSError:
             return False
 
 
@@ -472,10 +468,7 @@ class USBInterceptor:
         """
         async for event in self.monitor.monitor_events():
             # Block device if configured
-            if (
-                self.block_during_analysis
-                and event.event_type == EventType.ADD
-            ):
+            if self.block_during_analysis and event.event_type == EventType.ADD:
                 self.authorizer.deauthorize(event.bus, event.address)
                 logger.debug("Blocked device %s pending analysis", event.device_id)
 

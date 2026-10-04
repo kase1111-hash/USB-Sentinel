@@ -170,9 +170,9 @@ def create_app(
 
 def configure_services(
     app: FastAPI,
-    db: "AuditDatabase | None" = None,
-    policy_engine: "PolicyEngine | None" = None,
-    analyzer: "LLMAnalyzer | None" = None,
+    db: AuditDatabase | None = None,
+    policy_engine: PolicyEngine | None = None,
+    analyzer: LLMAnalyzer | None = None,
     default_api_key: str | None = None,
 ) -> None:
     """

@@ -10,9 +10,10 @@ Tests the LLM-based threat analysis including:
 """
 
 import json
-import pytest
 import time
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from sentinel.analyzer import (
     AnalysisResult,
@@ -37,7 +38,6 @@ from sentinel.interceptor.descriptors import (
     InterfaceDescriptor,
 )
 from sentinel.policy.models import Action
-
 
 # Test fixtures
 
@@ -208,13 +208,15 @@ class TestResponseValidation:
 
     def test_validate_valid_response(self):
         """Test validation of a valid response."""
-        response = json.dumps({
-            "risk_score": 25,
-            "verdict": "ALLOW",
-            "analysis": "Normal device",
-            "confidence": 0.95,
-            "threat_indicators": [],
-        })
+        response = json.dumps(
+            {
+                "risk_score": 25,
+                "verdict": "ALLOW",
+                "analysis": "Normal device",
+                "confidence": 0.95,
+                "threat_indicators": [],
+            }
+        )
         result = validate_response(response)
         assert result is not None
         assert result["risk_score"] == 25
@@ -223,11 +225,11 @@ class TestResponseValidation:
 
     def test_validate_response_in_markdown(self):
         """Test extraction from markdown code block."""
-        response = '''Some text before
+        response = """Some text before
 ```json
 {"risk_score": 50, "verdict": "SANDBOX", "analysis": "Suspicious patterns"}
 ```
-Some text after'''
+Some text after"""
         result = validate_response(response)
         assert result is not None
         assert result["risk_score"] == 50
@@ -245,37 +247,45 @@ Some text after'''
 
     def test_validate_invalid_risk_score(self):
         """Test rejection of invalid risk scores."""
-        response = json.dumps({
-            "risk_score": 150,  # > 100
-            "verdict": "ALLOW",
-            "analysis": "Test",
-        })
+        response = json.dumps(
+            {
+                "risk_score": 150,  # > 100
+                "verdict": "ALLOW",
+                "analysis": "Test",
+            }
+        )
         assert validate_response(response) is None
 
-        response = json.dumps({
-            "risk_score": -10,  # < 0
-            "verdict": "ALLOW",
-            "analysis": "Test",
-        })
+        response = json.dumps(
+            {
+                "risk_score": -10,  # < 0
+                "verdict": "ALLOW",
+                "analysis": "Test",
+            }
+        )
         assert validate_response(response) is None
 
     def test_validate_invalid_verdict(self):
         """Test rejection of invalid verdicts."""
-        response = json.dumps({
-            "risk_score": 25,
-            "verdict": "MAYBE",  # Invalid
-            "analysis": "Test",
-        })
+        response = json.dumps(
+            {
+                "risk_score": 25,
+                "verdict": "MAYBE",  # Invalid
+                "analysis": "Test",
+            }
+        )
         assert validate_response(response) is None
 
     def test_validate_confidence_clamping(self):
         """Test that confidence is clamped to valid range."""
-        response = json.dumps({
-            "risk_score": 25,
-            "verdict": "ALLOW",
-            "analysis": "Test",
-            "confidence": 1.5,  # > 1.0
-        })
+        response = json.dumps(
+            {
+                "risk_score": 25,
+                "verdict": "ALLOW",
+                "analysis": "Test",
+                "confidence": 1.5,  # > 1.0
+            }
+        )
         result = validate_response(response)
         assert result is not None
         assert result["confidence"] == 1.0
@@ -625,9 +635,7 @@ class TestScoring:
 
     def test_calculate_composite_score_capped(self):
         """Test score capping at 0-100."""
-        score = calculate_composite_score(
-            90, confidence=1.0, first_seen=True, has_anomalies=True
-        )
+        score = calculate_composite_score(90, confidence=1.0, first_seen=True, has_anomalies=True)
         assert score == 100  # Capped
 
     def test_get_risk_level(self):
@@ -675,6 +683,7 @@ class TestLLMAnalyzerMocked:
         """Create a mocked anthropic module."""
         with patch.dict("sys.modules", {"anthropic": MagicMock()}):
             import anthropic
+
             mock_client = MagicMock()
             anthropic.Anthropic = MagicMock(return_value=mock_client)
             yield mock_client
@@ -683,13 +692,19 @@ class TestLLMAnalyzerMocked:
         """Test successful analysis with mocked API."""
         # Setup mock response
         mock_response = MagicMock()
-        mock_response.content = [MagicMock(text=json.dumps({
-            "risk_score": 15,
-            "verdict": "ALLOW",
-            "analysis": "Normal Logitech keyboard",
-            "confidence": 0.95,
-            "threat_indicators": [],
-        }))]
+        mock_response.content = [
+            MagicMock(
+                text=json.dumps(
+                    {
+                        "risk_score": 15,
+                        "verdict": "ALLOW",
+                        "analysis": "Normal Logitech keyboard",
+                        "confidence": 0.95,
+                        "threat_indicators": [],
+                    }
+                )
+            )
+        ]
         mock_anthropic.messages.create.return_value = mock_response
 
         # Create analyzer and test
@@ -706,11 +721,17 @@ class TestLLMAnalyzerMocked:
         """Test retry behavior on transient failures."""
         # First call fails, second succeeds
         mock_response = MagicMock()
-        mock_response.content = [MagicMock(text=json.dumps({
-            "risk_score": 25,
-            "verdict": "ALLOW",
-            "analysis": "Test",
-        }))]
+        mock_response.content = [
+            MagicMock(
+                text=json.dumps(
+                    {
+                        "risk_score": 25,
+                        "verdict": "ALLOW",
+                        "analysis": "Test",
+                    }
+                )
+            )
+        ]
         mock_anthropic.messages.create.side_effect = [
             Exception("Network error"),
             mock_response,
@@ -730,11 +751,17 @@ class TestLLMAnalyzerMocked:
     def test_statistics_tracking(self, mock_anthropic, normal_keyboard):
         """Test that statistics are properly tracked."""
         mock_response = MagicMock()
-        mock_response.content = [MagicMock(text=json.dumps({
-            "risk_score": 25,
-            "verdict": "ALLOW",
-            "analysis": "Test",
-        }))]
+        mock_response.content = [
+            MagicMock(
+                text=json.dumps(
+                    {
+                        "risk_score": 25,
+                        "verdict": "ALLOW",
+                        "analysis": "Test",
+                    }
+                )
+            )
+        ]
         mock_anthropic.messages.create.return_value = mock_response
 
         analyzer = LLMAnalyzer(api_key="test-key")

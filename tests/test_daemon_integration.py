@@ -11,17 +11,14 @@ The only mocks are:
 
 from __future__ import annotations
 
-import asyncio
 import os
 import shutil
 import tempfile
-from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
 import pytest
 
 from sentinel.audit.database import AuditDatabase
-from sentinel.audit.models import TrustLevel
 from sentinel.config import SentinelConfig
 from sentinel.daemon import SentinelDaemon
 from sentinel.interceptor.descriptors import create_test_descriptor
@@ -29,7 +26,6 @@ from sentinel.interceptor.linux import EventType, USBEvent
 from sentinel.policy.engine import PolicyEngine
 from sentinel.policy.fingerprint import generate_fingerprint
 from sentinel.policy.parser import load_policy
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

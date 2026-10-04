@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -284,9 +284,7 @@ async def update_device(
     # Update fields
     if update.trust_level is not None:
         db.update_trust_level(fingerprint, update.trust_level.value)
-        logger.info(
-            f"Trust level updated: {fingerprint} -> {update.trust_level.value}"
-        )
+        logger.info(f"Trust level updated: {fingerprint} -> {update.trust_level.value}")
 
     if update.notes is not None:
         db.update_device_notes(fingerprint, update.notes)
@@ -484,6 +482,7 @@ async def get_policy(
             match_schema = "*"
         else:
             from sentinel.api.schemas import MatchConditionSchema
+
             match_schema = MatchConditionSchema(**match_dict)
 
         rules.append(

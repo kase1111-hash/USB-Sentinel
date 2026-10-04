@@ -18,27 +18,22 @@ ALLOW is a miss.
 
 from __future__ import annotations
 
-import os
-import shutil
-import tempfile
 from dataclasses import dataclass, field
 
 import pytest
 
 from sentinel.analyzer.llm import MockLLMAnalyzer
 from sentinel.analyzer.prompts import check_vendor_mismatch
-from sentinel.analyzer.scoring import AnalysisResult, calculate_composite_score, score_to_action
-from sentinel.interceptor.validator import DescriptorValidator, ValidationResult
+from sentinel.analyzer.scoring import calculate_composite_score, score_to_action
+from sentinel.interceptor.validator import DescriptorValidator
 from sentinel.policy.engine import PolicyEngine, create_default_policy
 from sentinel.policy.models import Action
-
 from tests.benchmark.descriptors import (
     ALL_DESCRIPTORS,
     BENIGN,
     MALICIOUS,
     LabeledDescriptor,
 )
-
 
 # ---------------------------------------------------------------------------
 # Metrics helpers
@@ -145,13 +140,15 @@ def evaluate_policy_only(
             else:
                 m.tn += 1
 
-        m.details.append({
-            "name": item.name,
-            "malicious": item.is_malicious,
-            "action": result.action.value,
-            "rule": result.matched_rule.comment if result.matched_rule else None,
-            "flagged": flagged,
-        })
+        m.details.append(
+            {
+                "name": item.name,
+                "malicious": item.is_malicious,
+                "action": result.action.value,
+                "rule": result.matched_rule.comment if result.matched_rule else None,
+                "flagged": flagged,
+            }
+        )
 
     return m
 
@@ -217,13 +214,15 @@ def evaluate_policy_plus_llm(
             else:
                 m.tn += 1
 
-        m.details.append({
-            "name": item.name,
-            "malicious": item.is_malicious,
-            "action": action.value,
-            "rule": result.matched_rule.comment if result.matched_rule else None,
-            "flagged": flagged,
-        })
+        m.details.append(
+            {
+                "name": item.name,
+                "malicious": item.is_malicious,
+                "action": action.value,
+                "rule": result.matched_rule.comment if result.matched_rule else None,
+                "flagged": flagged,
+            }
+        )
 
     return m
 
@@ -239,9 +238,7 @@ class TestPolicyOnlyBaseline:
     def test_policy_catches_known_signatures(self, policy_engine):
         """Policy blocks devices with known-bad VID:PID (CH340, STM32, etc)."""
         m = evaluate_policy_only(policy_engine, MALICIOUS)
-        blocked_names = [
-            d["name"] for d in m.details if d["action"] == "block"
-        ]
+        blocked_names = [d["name"] for d in m.details if d["action"] == "block"]
         # At minimum the CH340 and STM32 are in the default policy
         assert any("CH340" in n for n in blocked_names), (
             f"Expected CH340 to be blocked, got: {blocked_names}"
@@ -250,9 +247,8 @@ class TestPolicyOnlyBaseline:
     def test_policy_does_not_block_benign(self, policy_engine):
         """Policy must not hard-block legitimate devices."""
         m = evaluate_policy_only(policy_engine, BENIGN)
-        assert m.fp == 0, (
-            f"Benign devices incorrectly blocked: "
-            + ", ".join(d["name"] for d in m.details if d["action"] == "block")
+        assert m.fp == 0, "Benign devices incorrectly blocked: " + ", ".join(
+            d["name"] for d in m.details if d["action"] == "block"
         )
 
     def test_policy_detection_rate(self, policy_engine):
@@ -266,17 +262,12 @@ class TestPolicyOnlyBaseline:
 class TestPolicyPlusLLM:
     """Measure the policy+LLM detection accuracy."""
 
-    def test_llm_catches_novel_attacks(
-        self, policy_engine, mock_analyzer, validator
-    ):
+    def test_llm_catches_novel_attacks(self, policy_engine, mock_analyzer, validator):
         """LLM flags attacks that the policy engine alone misses."""
         policy_m = evaluate_policy_only(policy_engine, MALICIOUS)
-        llm_m = evaluate_policy_plus_llm(
-            policy_engine, mock_analyzer, validator, MALICIOUS
-        )
+        llm_m = evaluate_policy_plus_llm(policy_engine, mock_analyzer, validator, MALICIOUS)
         assert llm_m.tp >= policy_m.tp, (
-            f"LLM should catch at least as many as policy: "
-            f"policy={policy_m.tp}, llm={llm_m.tp}"
+            f"LLM should catch at least as many as policy: policy={policy_m.tp}, llm={llm_m.tp}"
         )
         # LLM should catch strictly more
         improvement = llm_m.tp - policy_m.tp
@@ -285,24 +276,16 @@ class TestPolicyPlusLLM:
             f"Policy TP={policy_m.tp}, LLM TP={llm_m.tp}"
         )
 
-    def test_llm_false_positive_rate(
-        self, policy_engine, mock_analyzer, validator
-    ):
+    def test_llm_false_positive_rate(self, policy_engine, mock_analyzer, validator):
         """LLM false-positive rate stays below 20%."""
-        m = evaluate_policy_plus_llm(
-            policy_engine, mock_analyzer, validator, ALL_DESCRIPTORS
-        )
+        m = evaluate_policy_plus_llm(policy_engine, mock_analyzer, validator, ALL_DESCRIPTORS)
         assert m.false_positive_rate < 0.20, (
             f"FPR too high: {m.false_positive_rate:.1%} (limit 20%)"
         )
 
-    def test_llm_detection_rate(
-        self, policy_engine, mock_analyzer, validator
-    ):
+    def test_llm_detection_rate(self, policy_engine, mock_analyzer, validator):
         """LLM achieves at least 60% detection rate on malicious devices."""
-        m = evaluate_policy_plus_llm(
-            policy_engine, mock_analyzer, validator, MALICIOUS
-        )
+        m = evaluate_policy_plus_llm(policy_engine, mock_analyzer, validator, MALICIOUS)
         assert m.detection_rate >= 0.60, (
             f"Detection rate too low: {m.detection_rate:.1%} (need ≥60%)"
         )
@@ -311,9 +294,7 @@ class TestPolicyPlusLLM:
 class TestLLMAddsValue:
     """The core value-proposition test: LLM must improve over policy-only."""
 
-    def test_llm_improves_detection(
-        self, policy_engine, mock_analyzer, validator
-    ):
+    def test_llm_improves_detection(self, policy_engine, mock_analyzer, validator):
         """Policy+LLM catches strictly more malicious devices than policy alone.
 
         The default policy already achieves ~88% recall via a
@@ -324,9 +305,7 @@ class TestLLMAddsValue:
         fills ≥50% of the gaps policy leaves open.
         """
         policy_m = evaluate_policy_only(policy_engine, ALL_DESCRIPTORS)
-        llm_m = evaluate_policy_plus_llm(
-            policy_engine, mock_analyzer, validator, ALL_DESCRIPTORS
-        )
+        llm_m = evaluate_policy_plus_llm(policy_engine, mock_analyzer, validator, ALL_DESCRIPTORS)
         policy_recall = policy_m.recall
         llm_recall = llm_m.recall
         improvement = llm_recall - policy_recall
@@ -340,8 +319,7 @@ class TestLLMAddsValue:
 
         # LLM must not regress
         assert llm_recall >= policy_recall, (
-            f"LLM must not reduce recall: policy={policy_recall:.1%}, "
-            f"llm={llm_recall:.1%}"
+            f"LLM must not reduce recall: policy={policy_recall:.1%}, llm={llm_recall:.1%}"
         )
         # Must close at least half the gap policy leaves
         policy_fn = policy_m.fn
@@ -360,25 +338,15 @@ class TestLLMAddsValue:
             f"delta={improvement:+.1%}"
         )
 
-    def test_llm_maintains_precision(
-        self, policy_engine, mock_analyzer, validator
-    ):
+    def test_llm_maintains_precision(self, policy_engine, mock_analyzer, validator):
         """LLM must not sacrifice precision (≥80%) for detection gains."""
-        m = evaluate_policy_plus_llm(
-            policy_engine, mock_analyzer, validator, ALL_DESCRIPTORS
-        )
-        assert m.precision >= 0.80, (
-            f"Precision too low: {m.precision:.1%} (need ≥80%)"
-        )
+        m = evaluate_policy_plus_llm(policy_engine, mock_analyzer, validator, ALL_DESCRIPTORS)
+        assert m.precision >= 0.80, f"Precision too low: {m.precision:.1%} (need ≥80%)"
 
-    def test_full_report(
-        self, policy_engine, mock_analyzer, validator
-    ):
+    def test_full_report(self, policy_engine, mock_analyzer, validator):
         """Print full benchmark report (not a hard assertion, just output)."""
         policy_m = evaluate_policy_only(policy_engine, ALL_DESCRIPTORS)
-        llm_m = evaluate_policy_plus_llm(
-            policy_engine, mock_analyzer, validator, ALL_DESCRIPTORS
-        )
+        llm_m = evaluate_policy_plus_llm(policy_engine, mock_analyzer, validator, ALL_DESCRIPTORS)
 
         print("\n" + "=" * 60)
         print("USB-Sentinel Detection Benchmark Report")
@@ -390,13 +358,9 @@ class TestLLMAddsValue:
 
         # Detail: what the LLM caught that policy missed
         policy_fn_names = {
-            d["name"] for d in policy_m.details
-            if d["malicious"] and not d["flagged"]
+            d["name"] for d in policy_m.details if d["malicious"] and not d["flagged"]
         }
-        llm_fn_names = {
-            d["name"] for d in llm_m.details
-            if d["malicious"] and not d["flagged"]
-        }
+        llm_fn_names = {d["name"] for d in llm_m.details if d["malicious"] and not d["flagged"]}
         newly_caught = policy_fn_names - llm_fn_names
 
         if newly_caught:

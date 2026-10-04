@@ -22,11 +22,9 @@ from typing import Any
 
 from sentinel import __version__
 from sentinel.audit.database import AuditDatabase
-from sentinel.config import load_config, validate_config
-from sentinel.interceptor.descriptors import DeviceDescriptor, InterfaceDescriptor
+from sentinel.config import load_config
+from sentinel.interceptor.descriptors import DeviceDescriptor
 from sentinel.policy.engine import PolicyEngine
-from sentinel.policy.fingerprint import generate_fingerprint
-from sentinel.policy.models import Action
 from sentinel.policy.parser import load_policy
 
 
@@ -37,12 +35,14 @@ def main(argv: list[str] | None = None) -> int:
         description="LLM-integrated USB firewall system",
     )
     parser.add_argument(
-        "-V", "--version",
+        "-V",
+        "--version",
         action="version",
         version=f"%(prog)s {__version__}",
     )
     parser.add_argument(
-        "-c", "--config",
+        "-c",
+        "--config",
         metavar="FILE",
         help="Path to configuration file",
     )
@@ -57,7 +57,8 @@ def main(argv: list[str] | None = None) -> int:
     # start command
     start_parser = subparsers.add_parser("start", help="Start the daemon")
     start_parser.add_argument(
-        "-f", "--foreground",
+        "-f",
+        "--foreground",
         action="store_true",
         help="Run in foreground",
     )
@@ -77,7 +78,8 @@ def main(argv: list[str] | None = None) -> int:
 
     list_parser = devices_sub.add_parser("list", help="List known devices")
     list_parser.add_argument(
-        "-a", "--all",
+        "-a",
+        "--all",
         action="store_true",
         help="Show all devices including old",
     )
@@ -103,17 +105,20 @@ def main(argv: list[str] | None = None) -> int:
     # events command
     events_parser = subparsers.add_parser("events", help="Query event log")
     events_parser.add_argument(
-        "-n", "--limit",
+        "-n",
+        "--limit",
         type=int,
         default=20,
         help="Number of events to show",
     )
     events_parser.add_argument(
-        "-d", "--device",
+        "-d",
+        "--device",
         help="Filter by device fingerprint",
     )
     events_parser.add_argument(
-        "-t", "--type",
+        "-t",
+        "--type",
         choices=["connect", "disconnect", "allowed", "blocked"],
         help="Filter by event type",
     )
@@ -162,7 +167,8 @@ def main(argv: list[str] | None = None) -> int:
         help="What to export",
     )
     export_parser.add_argument(
-        "-o", "--output",
+        "-o",
+        "--output",
         help="Output file (default: stdout)",
     )
     export_parser.add_argument(
@@ -456,7 +462,7 @@ def cmd_policy(args: argparse.Namespace) -> int:
             warnings = []
             for i, rule in enumerate(policy.rules[:-1]):
                 if rule.match.is_wildcard():
-                    warnings.append(f"Rule {i+1}: Wildcard not at end - later rules unreachable")
+                    warnings.append(f"Rule {i + 1}: Wildcard not at end - later rules unreachable")
 
             if warnings:
                 print("\nWarnings:")
@@ -573,12 +579,15 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         result = analyzer.analyze(descriptor)
 
         if getattr(args, "json", False):
-            output({
-                "risk_score": result.risk_score,
-                "verdict": result.verdict,
-                "analysis": result.analysis,
-                "confidence": result.confidence,
-            }, args)
+            output(
+                {
+                    "risk_score": result.risk_score,
+                    "verdict": result.verdict,
+                    "analysis": result.analysis,
+                    "confidence": result.confidence,
+                },
+                args,
+            )
         else:
             print(f"Risk Score:  {result.risk_score}/100")
             print(f"Verdict:     {result.verdict}")

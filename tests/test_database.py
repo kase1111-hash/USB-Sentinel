@@ -5,22 +5,21 @@ Tests for Audit Database module.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
 
-from sentinel.audit.database import AuditDatabase, create_database
+from sentinel.audit.database import AuditDatabase
 from sentinel.audit.models import EventType, TrustLevel
 from sentinel.audit.schemas import (
     DeviceCreate,
-    DeviceResponse,
     DeviceUpdate,
     EventCreate,
-    EventResponse,
-    TrustLevel as SchemaTrustLevel,
     device_to_response,
     event_to_response,
+)
+from sentinel.audit.schemas import (
+    TrustLevel as SchemaTrustLevel,
 )
 
 

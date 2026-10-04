@@ -8,14 +8,15 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 from sentinel.policy.fingerprint import FingerprintDatabase, generate_fingerprint
 from sentinel.policy.models import Action, MatchCondition, Policy, PolicyRule, USBClass
-from sentinel.policy.parser import PolicyParseError, load_policy, validate_policy
+from sentinel.policy.parser import load_policy, validate_policy
 
 if TYPE_CHECKING:
     from sentinel.interceptor.descriptors import DeviceDescriptor
@@ -112,24 +113,24 @@ class RuleMatcher:
         # Check each condition (AND logic - all must match)
 
         # VID exact match
-        if condition.vid is not None:
-            if device.vid.lower() != condition.vid.lower():
-                return False
+        if condition.vid is not None and device.vid.lower() != condition.vid.lower():
+            return False
 
         # PID exact match
-        if condition.pid is not None:
-            if device.pid.lower() != condition.pid.lower():
-                return False
+        if condition.pid is not None and device.pid.lower() != condition.pid.lower():
+            return False
 
         # VID list match (OR within list)
-        if condition.vid_list is not None:
-            if device.vid.lower() not in [v.lower() for v in condition.vid_list]:
-                return False
+        if condition.vid_list is not None and device.vid.lower() not in [
+            v.lower() for v in condition.vid_list
+        ]:
+            return False
 
         # PID list match (OR within list)
-        if condition.pid_list is not None:
-            if device.pid.lower() not in [p.lower() for p in condition.pid_list]:
-                return False
+        if condition.pid_list is not None and device.pid.lower() not in [
+            p.lower() for p in condition.pid_list
+        ]:
+            return False
 
         # VID range match
         if condition.vid_range is not None:
@@ -157,28 +158,25 @@ class RuleMatcher:
                 return False
 
         # Manufacturer regex match
-        if condition.manufacturer is not None:
-            if not self._matches_regex(
-                condition.manufacturer,
-                device.manufacturer or "",
-            ):
-                return False
+        if condition.manufacturer is not None and not self._matches_regex(
+            condition.manufacturer,
+            device.manufacturer or "",
+        ):
+            return False
 
         # Product regex match
-        if condition.product is not None:
-            if not self._matches_regex(
-                condition.product,
-                device.product or "",
-            ):
-                return False
+        if condition.product is not None and not self._matches_regex(
+            condition.product,
+            device.product or "",
+        ):
+            return False
 
         # Serial regex match
-        if condition.serial is not None:
-            if not self._matches_regex(
-                condition.serial,
-                device.serial or "",
-            ):
-                return False
+        if condition.serial is not None and not self._matches_regex(
+            condition.serial,
+            device.serial or "",
+        ):
+            return False
 
         # Has storage endpoint
         if condition.has_storage_endpoint is not None:
@@ -199,40 +197,44 @@ class RuleMatcher:
                 return False
 
         # Is composite device (multiple interfaces)
-        if condition.is_composite is not None:
-            is_composite = len(device.interfaces) > 1
-            if condition.is_composite != is_composite:
-                return False
+        if condition.is_composite is not None and condition.is_composite != device.is_composite:
+            return False
 
         # Is keyboard
-        if condition.is_keyboard is not None:
-            if condition.is_keyboard != device.has_keyboard:
-                return False
+        if condition.is_keyboard is not None and condition.is_keyboard != device.has_keyboard:
+            return False
 
         # Is mouse
-        if condition.is_mouse is not None:
-            if condition.is_mouse != device.has_mouse:
-                return False
+        if condition.is_mouse is not None and condition.is_mouse != device.has_mouse:
+            return False
 
         # Endpoint count > N
-        if condition.endpoint_count_gt is not None:
-            if device.total_endpoints <= condition.endpoint_count_gt:
-                return False
+        if (
+            condition.endpoint_count_gt is not None
+            and device.total_endpoints <= condition.endpoint_count_gt
+        ):
+            return False
 
         # Endpoint count < N
-        if condition.endpoint_count_lt is not None:
-            if device.total_endpoints >= condition.endpoint_count_lt:
-                return False
+        if (
+            condition.endpoint_count_lt is not None
+            and device.total_endpoints >= condition.endpoint_count_lt
+        ):
+            return False
 
         # Interface count > N
-        if condition.interface_count_gt is not None:
-            if len(device.interfaces) <= condition.interface_count_gt:
-                return False
+        if (
+            condition.interface_count_gt is not None
+            and len(device.interfaces) <= condition.interface_count_gt
+        ):
+            return False
 
         # Interface count < N
-        if condition.interface_count_lt is not None:
-            if len(device.interfaces) >= condition.interface_count_lt:
-                return False
+        if (
+            condition.interface_count_lt is not None
+            and len(device.interfaces) >= condition.interface_count_lt
+        ):
+            return False
 
         # First seen check
         if condition.first_seen is not None:
@@ -279,10 +281,7 @@ class RuleMatcher:
         if device.device_class == class_code:
             return True
         # Check interface classes
-        return any(
-            intf.interface_class == class_code
-            for intf in device.interfaces
-        )
+        return any(intf.interface_class == class_code for intf in device.interfaces)
 
     def _matches_any_class(self, device: DeviceDescriptor, class_codes: list[int]) -> bool:
         """Check if device matches any of the specified classes."""
@@ -290,10 +289,7 @@ class RuleMatcher:
         if device.device_class in class_codes:
             return True
         # Check interface classes
-        return any(
-            intf.interface_class in class_codes
-            for intf in device.interfaces
-        )
+        return any(intf.interface_class in class_codes for intf in device.interfaces)
 
     def _has_bulk_endpoint(self, device: DeviceDescriptor) -> bool:
         """Check if device has any bulk transfer endpoints."""
@@ -419,7 +415,10 @@ class PolicyEngine:
 
                 logger.debug(
                     "Device %s: %s (rule %d: %s)",
-                    device.vid_pid, result.action.value, i, rule.comment
+                    device.vid_pid,
+                    result.action.value,
+                    i,
+                    rule.comment,
                 )
                 return result
 
@@ -438,10 +437,7 @@ class PolicyEngine:
         self._update_stats(result.action)
         self._run_post_hooks(device, result)
 
-        logger.debug(
-            "Device %s: %s (default)",
-            device.vid_pid, result.action.value
-        )
+        logger.debug("Device %s: %s (default)", device.vid_pid, result.action.value)
         return result
 
     def _update_stats(self, action: Action) -> None:
@@ -625,20 +621,24 @@ class PolicyBuilder:
 
     def default_review(self, comment: str = "") -> PolicyBuilder:
         """Add a default REVIEW rule (wildcard)."""
-        self.rules.append(PolicyRule(
-            match=MatchCondition(match_all=True),
-            action=Action.REVIEW,
-            comment=comment or "Default: review unknown devices",
-        ))
+        self.rules.append(
+            PolicyRule(
+                match=MatchCondition(match_all=True),
+                action=Action.REVIEW,
+                comment=comment or "Default: review unknown devices",
+            )
+        )
         return self
 
     def default_block(self, comment: str = "") -> PolicyBuilder:
         """Add a default BLOCK rule (wildcard)."""
-        self.rules.append(PolicyRule(
-            match=MatchCondition(match_all=True),
-            action=Action.BLOCK,
-            comment=comment or "Default: block unknown devices",
-        ))
+        self.rules.append(
+            PolicyRule(
+                match=MatchCondition(match_all=True),
+                action=Action.BLOCK,
+                comment=comment or "Default: block unknown devices",
+            )
+        )
         return self
 
     def _add_rule(
@@ -662,11 +662,13 @@ class PolicyBuilder:
             endpoint_count_gt=kwargs.get("endpoint_count_gt"),
             first_seen=kwargs.get("first_seen"),
         )
-        self.rules.append(PolicyRule(
-            match=condition,
-            action=action,
-            comment=comment,
-        ))
+        self.rules.append(
+            PolicyRule(
+                match=condition,
+                action=action,
+                comment=comment,
+            )
+        )
         return self
 
     def build(self) -> Policy:

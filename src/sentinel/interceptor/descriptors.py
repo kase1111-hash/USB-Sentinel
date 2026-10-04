@@ -116,9 +116,7 @@ class InterfaceDescriptor:
             0xFE: "Application Specific",
             0xFF: "Vendor Specific",
         }
-        return class_names.get(
-            self.interface_class, f"Unknown (0x{self.interface_class:02X})"
-        )
+        return class_names.get(self.interface_class, f"Unknown (0x{self.interface_class:02X})")
 
     @property
     def is_hid(self) -> bool:
@@ -175,10 +173,7 @@ class InterfaceDescriptor:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> InterfaceDescriptor:
         """Create from dictionary."""
-        endpoints = [
-            EndpointDescriptor.from_dict(ep)
-            for ep in data.get("endpoints", [])
-        ]
+        endpoints = [EndpointDescriptor.from_dict(ep) for ep in data.get("endpoints", [])]
         return cls(
             interface_class=data.get("interface_class", 0),
             interface_subclass=data.get("interface_subclass", 0),
@@ -315,10 +310,7 @@ class DeviceDescriptor:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> DeviceDescriptor:
         """Create from dictionary."""
-        interfaces = [
-            InterfaceDescriptor.from_dict(intf)
-            for intf in data.get("interfaces", [])
-        ]
+        interfaces = [InterfaceDescriptor.from_dict(intf) for intf in data.get("interfaces", [])]
 
         timestamp = data.get("timestamp")
         if isinstance(timestamp, str):
@@ -413,19 +405,9 @@ def extract_device_info(dev: Any) -> DeviceDescriptor:
         device_class=dev.bDeviceClass,
         device_subclass=dev.bDeviceSubClass,
         device_protocol=dev.bDeviceProtocol,
-        manufacturer=(
-            usb.util.get_string(dev, dev.iManufacturer)
-            if dev.iManufacturer
-            else None
-        ),
-        product=(
-            usb.util.get_string(dev, dev.iProduct) if dev.iProduct else None
-        ),
-        serial=(
-            usb.util.get_string(dev, dev.iSerialNumber)
-            if dev.iSerialNumber
-            else None
-        ),
+        manufacturer=(usb.util.get_string(dev, dev.iManufacturer) if dev.iManufacturer else None),
+        product=(usb.util.get_string(dev, dev.iProduct) if dev.iProduct else None),
+        serial=(usb.util.get_string(dev, dev.iSerialNumber) if dev.iSerialNumber else None),
         interfaces=interfaces,
         bus=dev.bus,
         address=dev.address,

@@ -6,20 +6,17 @@ descriptor validation, and audit logging.
 """
 
 import pytest
-import tempfile
-from pathlib import Path
 
 from sentinel.core import (
     DeviceProcessor,
     PolicyWatcher,
-    ProcessingResult,
     Verdict,
     create_processor,
 )
 from sentinel.interceptor.descriptors import (
     DeviceDescriptor,
-    InterfaceDescriptor,
     EndpointDescriptor,
+    InterfaceDescriptor,
 )
 from sentinel.policy import (
     Action,
@@ -29,10 +26,9 @@ from sentinel.policy import (
     PolicyEngine,
     PolicyRule,
 )
-from sentinel.policy.fingerprint import FingerprintDatabase
-
 
 # Test fixtures
+
 
 @pytest.fixture
 def normal_keyboard():
@@ -189,6 +185,7 @@ def processor(simple_policy):
 
 # Tests for ProcessingResult
 
+
 class TestProcessingResult:
     """Tests for ProcessingResult class."""
 
@@ -215,6 +212,7 @@ class TestProcessingResult:
 
 # Tests for DeviceProcessor
 
+
 class TestDeviceProcessor:
     """Tests for DeviceProcessor class."""
 
@@ -230,7 +228,10 @@ class TestDeviceProcessor:
         result = processor.process(attack_device)
         assert result.verdict == Verdict.BLOCK
         assert result.policy_result.action == Action.BLOCK
-        assert "CH340" in result.policy_result.reason or "attack" in result.policy_result.reason.lower()
+        assert (
+            "CH340" in result.policy_result.reason
+            or "attack" in result.policy_result.reason.lower()
+        )
 
     def test_process_suspicious_device(self, processor, suspicious_hid_storage):
         """Test processing a suspicious device that needs review."""
@@ -333,29 +334,62 @@ class TestDeviceProcessor:
 
 # Tests for advanced matching conditions
 
+
 class TestAdvancedMatching:
     """Tests for advanced matching conditions."""
 
     def test_vid_list_match(self):
         """Test matching against a list of VIDs."""
-        policy = Policy(rules=[
-            PolicyRule(
-                match=MatchCondition(vid_list=["046d", "045e", "05ac"]),
-                action=Action.ALLOW,
-                comment="Known vendors",
-            ),
-            PolicyRule(
-                match=MatchCondition(match_all=True),
-                action=Action.BLOCK,
-                comment="Block others",
-            ),
-        ])
+        policy = Policy(
+            rules=[
+                PolicyRule(
+                    match=MatchCondition(vid_list=["046d", "045e", "05ac"]),
+                    action=Action.ALLOW,
+                    comment="Known vendors",
+                ),
+                PolicyRule(
+                    match=MatchCondition(match_all=True),
+                    action=Action.BLOCK,
+                    comment="Block others",
+                ),
+            ]
+        )
         engine = PolicyEngine(policy=policy)
         processor = DeviceProcessor(policy_engine=engine)
 
-        logitech = DeviceDescriptor(vid="046d", pid="1234", device_class=0, device_subclass=0, device_protocol=0, manufacturer=None, product=None, serial=None, interfaces=[])
-        microsoft = DeviceDescriptor(vid="045e", pid="1234", device_class=0, device_subclass=0, device_protocol=0, manufacturer=None, product=None, serial=None, interfaces=[])
-        unknown = DeviceDescriptor(vid="dead", pid="beef", device_class=0, device_subclass=0, device_protocol=0, manufacturer=None, product=None, serial=None, interfaces=[])
+        logitech = DeviceDescriptor(
+            vid="046d",
+            pid="1234",
+            device_class=0,
+            device_subclass=0,
+            device_protocol=0,
+            manufacturer=None,
+            product=None,
+            serial=None,
+            interfaces=[],
+        )
+        microsoft = DeviceDescriptor(
+            vid="045e",
+            pid="1234",
+            device_class=0,
+            device_subclass=0,
+            device_protocol=0,
+            manufacturer=None,
+            product=None,
+            serial=None,
+            interfaces=[],
+        )
+        unknown = DeviceDescriptor(
+            vid="dead",
+            pid="beef",
+            device_class=0,
+            device_subclass=0,
+            device_protocol=0,
+            manufacturer=None,
+            product=None,
+            serial=None,
+            interfaces=[],
+        )
 
         assert processor.process(logitech).policy_result.action == Action.ALLOW
         assert processor.process(microsoft).policy_result.action == Action.ALLOW
@@ -363,24 +397,56 @@ class TestAdvancedMatching:
 
     def test_vid_range_match(self):
         """Test matching against a VID range."""
-        policy = Policy(rules=[
-            PolicyRule(
-                match=MatchCondition(vid_range=("0400", "04ff")),
-                action=Action.ALLOW,
-                comment="VID range 0400-04ff",
-            ),
-            PolicyRule(
-                match=MatchCondition(match_all=True),
-                action=Action.BLOCK,
-                comment="Block others",
-            ),
-        ])
+        policy = Policy(
+            rules=[
+                PolicyRule(
+                    match=MatchCondition(vid_range=("0400", "04ff")),
+                    action=Action.ALLOW,
+                    comment="VID range 0400-04ff",
+                ),
+                PolicyRule(
+                    match=MatchCondition(match_all=True),
+                    action=Action.BLOCK,
+                    comment="Block others",
+                ),
+            ]
+        )
         engine = PolicyEngine(policy=policy)
         processor = DeviceProcessor(policy_engine=engine)
 
-        in_range = DeviceDescriptor(vid="0450", pid="1234", device_class=0, device_subclass=0, device_protocol=0, manufacturer=None, product=None, serial=None, interfaces=[])
-        below_range = DeviceDescriptor(vid="0300", pid="1234", device_class=0, device_subclass=0, device_protocol=0, manufacturer=None, product=None, serial=None, interfaces=[])
-        above_range = DeviceDescriptor(vid="0500", pid="1234", device_class=0, device_subclass=0, device_protocol=0, manufacturer=None, product=None, serial=None, interfaces=[])
+        in_range = DeviceDescriptor(
+            vid="0450",
+            pid="1234",
+            device_class=0,
+            device_subclass=0,
+            device_protocol=0,
+            manufacturer=None,
+            product=None,
+            serial=None,
+            interfaces=[],
+        )
+        below_range = DeviceDescriptor(
+            vid="0300",
+            pid="1234",
+            device_class=0,
+            device_subclass=0,
+            device_protocol=0,
+            manufacturer=None,
+            product=None,
+            serial=None,
+            interfaces=[],
+        )
+        above_range = DeviceDescriptor(
+            vid="0500",
+            pid="1234",
+            device_class=0,
+            device_subclass=0,
+            device_protocol=0,
+            manufacturer=None,
+            product=None,
+            serial=None,
+            interfaces=[],
+        )
 
         assert processor.process(in_range).policy_result.action == Action.ALLOW
         assert processor.process(below_range).policy_result.action == Action.BLOCK
@@ -388,18 +454,20 @@ class TestAdvancedMatching:
 
     def test_composite_device_match(self):
         """Test matching composite devices."""
-        policy = Policy(rules=[
-            PolicyRule(
-                match=MatchCondition(is_composite=True),
-                action=Action.REVIEW,
-                comment="Review composite devices",
-            ),
-            PolicyRule(
-                match=MatchCondition(match_all=True),
-                action=Action.ALLOW,
-                comment="Allow simple devices",
-            ),
-        ])
+        policy = Policy(
+            rules=[
+                PolicyRule(
+                    match=MatchCondition(is_composite=True),
+                    action=Action.REVIEW,
+                    comment="Review composite devices",
+                ),
+                PolicyRule(
+                    match=MatchCondition(match_all=True),
+                    action=Action.ALLOW,
+                    comment="Allow simple devices",
+                ),
+            ]
+        )
         engine = PolicyEngine(policy=policy)
         processor = DeviceProcessor(policy_engine=engine)
 
@@ -434,8 +502,22 @@ class TestAdvancedMatching:
             product=None,
             serial=None,
             interfaces=[
-                InterfaceDescriptor(interface_class=3, interface_subclass=0, interface_protocol=0, num_endpoints=0, interface_number=0, endpoints=[]),
-                InterfaceDescriptor(interface_class=8, interface_subclass=0, interface_protocol=0, num_endpoints=0, interface_number=1, endpoints=[]),
+                InterfaceDescriptor(
+                    interface_class=3,
+                    interface_subclass=0,
+                    interface_protocol=0,
+                    num_endpoints=0,
+                    interface_number=0,
+                    endpoints=[],
+                ),
+                InterfaceDescriptor(
+                    interface_class=8,
+                    interface_subclass=0,
+                    interface_protocol=0,
+                    num_endpoints=0,
+                    interface_number=1,
+                    endpoints=[],
+                ),
             ],
         )
 
@@ -444,23 +526,25 @@ class TestAdvancedMatching:
 
     def test_keyboard_mouse_match(self):
         """Test matching keyboard and mouse devices."""
-        policy = Policy(rules=[
-            PolicyRule(
-                match=MatchCondition(is_keyboard=True),
-                action=Action.REVIEW,
-                comment="Review keyboards",
-            ),
-            PolicyRule(
-                match=MatchCondition(is_mouse=True),
-                action=Action.ALLOW,
-                comment="Allow mice",
-            ),
-            PolicyRule(
-                match=MatchCondition(match_all=True),
-                action=Action.BLOCK,
-                comment="Block others",
-            ),
-        ])
+        policy = Policy(
+            rules=[
+                PolicyRule(
+                    match=MatchCondition(is_keyboard=True),
+                    action=Action.REVIEW,
+                    comment="Review keyboards",
+                ),
+                PolicyRule(
+                    match=MatchCondition(is_mouse=True),
+                    action=Action.ALLOW,
+                    comment="Allow mice",
+                ),
+                PolicyRule(
+                    match=MatchCondition(match_all=True),
+                    action=Action.BLOCK,
+                    comment="Block others",
+                ),
+            ]
+        )
         engine = PolicyEngine(policy=policy)
         processor = DeviceProcessor(policy_engine=engine)
 
@@ -511,18 +595,20 @@ class TestAdvancedMatching:
 
     def test_interface_count_match(self):
         """Test matching by interface count."""
-        policy = Policy(rules=[
-            PolicyRule(
-                match=MatchCondition(interface_count_gt=2),
-                action=Action.BLOCK,
-                comment="Block devices with >2 interfaces",
-            ),
-            PolicyRule(
-                match=MatchCondition(match_all=True),
-                action=Action.ALLOW,
-                comment="Allow others",
-            ),
-        ])
+        policy = Policy(
+            rules=[
+                PolicyRule(
+                    match=MatchCondition(interface_count_gt=2),
+                    action=Action.BLOCK,
+                    comment="Block devices with >2 interfaces",
+                ),
+                PolicyRule(
+                    match=MatchCondition(match_all=True),
+                    action=Action.ALLOW,
+                    comment="Allow others",
+                ),
+            ]
+        )
         engine = PolicyEngine(policy=policy)
         processor = DeviceProcessor(policy_engine=engine)
 
@@ -536,8 +622,22 @@ class TestAdvancedMatching:
             product=None,
             serial=None,
             interfaces=[
-                InterfaceDescriptor(interface_class=3, interface_subclass=0, interface_protocol=0, num_endpoints=0, interface_number=0, endpoints=[]),
-                InterfaceDescriptor(interface_class=8, interface_subclass=0, interface_protocol=0, num_endpoints=0, interface_number=1, endpoints=[]),
+                InterfaceDescriptor(
+                    interface_class=3,
+                    interface_subclass=0,
+                    interface_protocol=0,
+                    num_endpoints=0,
+                    interface_number=0,
+                    endpoints=[],
+                ),
+                InterfaceDescriptor(
+                    interface_class=8,
+                    interface_subclass=0,
+                    interface_protocol=0,
+                    num_endpoints=0,
+                    interface_number=1,
+                    endpoints=[],
+                ),
             ],
         )
 
@@ -551,10 +651,38 @@ class TestAdvancedMatching:
             product=None,
             serial=None,
             interfaces=[
-                InterfaceDescriptor(interface_class=3, interface_subclass=0, interface_protocol=0, num_endpoints=0, interface_number=0, endpoints=[]),
-                InterfaceDescriptor(interface_class=8, interface_subclass=0, interface_protocol=0, num_endpoints=0, interface_number=1, endpoints=[]),
-                InterfaceDescriptor(interface_class=1, interface_subclass=0, interface_protocol=0, num_endpoints=0, interface_number=2, endpoints=[]),
-                InterfaceDescriptor(interface_class=2, interface_subclass=0, interface_protocol=0, num_endpoints=0, interface_number=3, endpoints=[]),
+                InterfaceDescriptor(
+                    interface_class=3,
+                    interface_subclass=0,
+                    interface_protocol=0,
+                    num_endpoints=0,
+                    interface_number=0,
+                    endpoints=[],
+                ),
+                InterfaceDescriptor(
+                    interface_class=8,
+                    interface_subclass=0,
+                    interface_protocol=0,
+                    num_endpoints=0,
+                    interface_number=1,
+                    endpoints=[],
+                ),
+                InterfaceDescriptor(
+                    interface_class=1,
+                    interface_subclass=0,
+                    interface_protocol=0,
+                    num_endpoints=0,
+                    interface_number=2,
+                    endpoints=[],
+                ),
+                InterfaceDescriptor(
+                    interface_class=2,
+                    interface_subclass=0,
+                    interface_protocol=0,
+                    num_endpoints=0,
+                    interface_number=3,
+                    endpoints=[],
+                ),
             ],
         )
 
@@ -563,6 +691,7 @@ class TestAdvancedMatching:
 
 
 # Tests for PolicyWatcher
+
 
 class TestPolicyWatcher:
     """Tests for PolicyWatcher class."""
@@ -587,6 +716,7 @@ rules:
 
 # Tests for create_processor helper
 
+
 class TestCreateProcessor:
     """Tests for create_processor factory function."""
 
@@ -607,7 +737,17 @@ rules:
         processor = create_processor(policy_path=policy_file)
         assert processor is not None
 
-        device = DeviceDescriptor(vid="046d", pid="1234", device_class=0, device_subclass=0, device_protocol=0, manufacturer=None, product=None, serial=None, interfaces=[])
+        device = DeviceDescriptor(
+            vid="046d",
+            pid="1234",
+            device_class=0,
+            device_subclass=0,
+            device_protocol=0,
+            manufacturer=None,
+            product=None,
+            serial=None,
+            interfaces=[],
+        )
         result = processor.process(device)
         assert result.policy_result.action == Action.ALLOW
 
@@ -617,7 +757,17 @@ rules:
         assert processor is not None
 
         # Default policy should allow Logitech
-        device = DeviceDescriptor(vid="046d", pid="1234", device_class=0, device_subclass=0, device_protocol=0, manufacturer=None, product=None, serial=None, interfaces=[])
+        device = DeviceDescriptor(
+            vid="046d",
+            pid="1234",
+            device_class=0,
+            device_subclass=0,
+            device_protocol=0,
+            manufacturer=None,
+            product=None,
+            serial=None,
+            interfaces=[],
+        )
         result = processor.process(device)
         assert result.policy_result.action == Action.ALLOW
 
