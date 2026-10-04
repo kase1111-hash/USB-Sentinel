@@ -175,12 +175,16 @@ def format_device_prompt(
 
     history_text = history or "No previous history for this device."
 
+    # Manufacturer/product/serial come from the device and may carry
+    # prompt-injection attempts.
+    strings = sanitize_device_strings(device)
+
     return DEVICE_ANALYSIS_PROMPT.format(
         vid=device.vid,
         pid=device.pid,
-        manufacturer=device.manufacturer or "Not specified",
-        product=device.product or "Not specified",
-        serial=device.serial or "Not specified",
+        manufacturer=strings["manufacturer"] or "Not specified",
+        product=strings["product"] or "Not specified",
+        serial=strings["serial"] or "Not specified",
         device_class=device.device_class,
         device_class_name=device.class_name,
         device_subclass=device.device_subclass,

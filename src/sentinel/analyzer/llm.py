@@ -19,7 +19,7 @@ from sentinel.analyzer.prompts import (
     check_vendor_mismatch,
     format_behavior_prompt,
     format_device_prompt,
-    sanitize_device_strings,
+    sanitize_input,
     validate_response,
 )
 from sentinel.analyzer.scoring import AnalysisResult, Verdict
@@ -142,6 +142,18 @@ class AnalyzerStats:
         return self.total_latency_ms / self.successful_requests
 
 
+class NonRetryableError(Exception):
+    """An analysis failure that retrying cannot fix (e.g. a refusal)."""
+
+
+def _is_non_retryable(error: Exception) -> bool:
+    """Client errors (bad request, auth, unknown model) and refusals."""
+    if isinstance(error, NonRetryableError):
+        return True
+    status = getattr(error, "status_code", None)
+    return isinstance(status, int) and 400 <= status < 500 and status not in (408, 409, 429)
+
+
 class LLMAnalyzer:
     """
     USB threat analyzer using Claude API.
@@ -156,11 +168,12 @@ class LLMAnalyzer:
     def __init__(
         self,
         api_key: str,
-        model: str = "claude-sonnet-4-20250514",
+        model: str = "claude-sonnet-5-5",
         max_tokens: int = 1024,
         timeout: float = 30.0,
         rate_limit: int = 60,  # requests per minute
         retry_config: RetryConfig | None = None,
+        effort: str | None = None,
     ) -> None:
         """
         Initialize the LLM analyzer.
@@ -172,18 +185,23 @@ class LLMAnalyzer:
             timeout: Request timeout in seconds
             rate_limit: Maximum requests per minute
             retry_config: Retry configuration
+            effort: Optional output_config.effort; None omits it (for
+                models that do not support effort)
         """
         try:
             import anthropic
 
-            self.client = anthropic.Anthropic(api_key=api_key)
-        except ImportError:
+            # Retries are handled here (with non-retryable errors skipped),
+            # so the SDK's own retries are disabled to keep latency bounded.
+            self.client = anthropic.Anthropic(api_key=api_key, timeout=timeout, max_retries=0)
+        except ImportError as e:
             logger.error("anthropic package not installed")
-            raise RuntimeError("anthropic package required for LLM analysis")
+            raise RuntimeError("anthropic package required for LLM analysis") from e
 
         self.model = model
         self.max_tokens = max_tokens
         self.timeout = timeout
+        self.effort = effort
 
         # Rate limiter: convert requests/minute to tokens/second
         self.rate_limiter = TokenBucket(
@@ -216,14 +234,26 @@ class LLMAnalyzer:
         Raises:
             Exception: On API errors
         """
+        kwargs: dict[str, Any] = {}
+        if self.effort:
+            kwargs["output_config"] = {"effort": self.effort}
+
         response = self.client.messages.create(
             model=self.model,
             max_tokens=self.max_tokens,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": prompt}],
+            **kwargs,
         )
-        # Extract text from response
-        return response.content[0].text
+
+        if response.stop_reason == "refusal":
+            raise NonRetryableError("Model declined to analyze this device")
+
+        # Current models may return thinking blocks before the text block
+        text = "".join(block.text for block in response.content if block.type == "text")
+        if not text:
+            raise ValueError(f"No text in LLM response (stop_reason={response.stop_reason})")
+        return text
 
     def analyze(
         self,
@@ -248,19 +278,16 @@ class LLMAnalyzer:
         start_time = time.monotonic()
         self.stats.total_requests += 1
 
-        # Check for known vendor mismatches
+        # Check for known vendor mismatches. The warning quotes the
+        # device-supplied manufacturer string, so sanitize it too.
         vendor_warning = check_vendor_mismatch(device)
-
-        # Sanitize device strings
-        sanitized = sanitize_device_strings(device)
 
         # Build history context
         history_context = build_history_context(history, similar_devices)
         if vendor_warning:
-            history_context = f"**WARNING:** {vendor_warning}\n\n{history_context}"
+            history_context = f"**WARNING:** {sanitize_input(vendor_warning)}\n\n{history_context}"
 
-        # Create sanitized device copy for prompt
-        # (We use the sanitized strings but keep the original device structure)
+        # format_device_prompt sanitizes the device-supplied strings
         prompt = format_device_prompt(device, history_context)
 
         # Rate limiting
@@ -314,6 +341,9 @@ class LLMAnalyzer:
 
             except Exception as e:
                 last_error = e
+                if _is_non_retryable(e):
+                    logger.error("Analysis failed (not retrying): %s", e)
+                    break
                 if attempt < self.retry_config.max_retries:
                     delay = self.retry_config.get_delay(attempt)
                     logger.warning(
