@@ -13,6 +13,7 @@ is reached.
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Iterator
 from pathlib import Path
@@ -60,6 +61,29 @@ def parse_interfaces(raw: bytes) -> list[InterfaceDescriptor]:
     unknown descriptors are skipped; a truncated blob ends parsing.
     """
     interfaces: list[InterfaceDescriptor] = []
+    pos = 0
+
+    # Walk top-level descriptors; each configuration is parsed only within
+    # its own wTotalLength, as the kernel does, so a malformed descriptor
+    # in one configuration cannot swallow the next one.
+    while pos + 2 <= len(raw):
+        length = raw[pos]
+        if length < 2 or pos + length > len(raw):
+            break
+        if raw[pos + 1] == _DT_CONFIG and length >= 4:
+            total = int.from_bytes(raw[pos + 2 : pos + 4], "little")
+            end = min(len(raw), pos + max(total, length))
+            interfaces.extend(_parse_config(raw[pos + length : end]))
+            pos = end
+        else:
+            pos += length
+
+    return interfaces
+
+
+def _parse_config(raw: bytes) -> list[InterfaceDescriptor]:
+    """Interfaces and endpoints within one configuration's descriptors."""
+    interfaces: list[InterfaceDescriptor] = []
     current: InterfaceDescriptor | None = None
     pos = 0
 
@@ -89,8 +113,6 @@ def parse_interfaces(raw: bytes) -> list[InterfaceDescriptor]:
                     interval=desc[6],
                 )
             )
-        elif dtype == _DT_CONFIG:
-            current = None
 
         pos += length
 
@@ -196,6 +218,17 @@ def is_authorized(sys_path: str | Path) -> bool | None:
     return value == "1"
 
 
+def is_same_device(sys_path: str | Path, bus: int, address: int) -> bool:
+    """
+    True if the device at sys_path is still the one enumerated as bus:address.
+
+    A port's sysfs path is reused when a device is unplugged and another
+    plugged in, but the kernel assigns the new device a fresh address.
+    """
+    path = Path(sys_path)
+    return _read_int(path, "busnum") == bus and _read_int(path, "devnum") == address
+
+
 def set_authorized(sys_path: str | Path, authorized: bool) -> bool:
     """
     Authorize (bind drivers) or deauthorize (unbind) a device.
@@ -228,12 +261,34 @@ class DefaultDenyGuard:
     restores the previous values.
 
     If the daemon dies without releasing, new devices stay unauthorized
-    until it restarts: the guard fails closed.
+    until it restarts: the guard fails closed. The original values are kept
+    in ``state_file`` (if given) so the next run restores the real
+    originals rather than the 0 the previous run left behind.
     """
 
-    def __init__(self, root: Path | None = None) -> None:
+    def __init__(self, root: Path | None = None, state_file: Path | None = None) -> None:
         self.root = root
+        self.state_file = state_file
         self._saved: dict[Path, str] = {}
+        self._previous = self._load_state()
+
+    def _load_state(self) -> dict[str, str]:
+        if self.state_file is None:
+            return {}
+        try:
+            data = json.loads(self.state_file.read_text())
+        except (OSError, ValueError):
+            return {}
+        return {str(k): str(v) for k, v in data.items()} if isinstance(data, dict) else {}
+
+    def _save_state(self) -> None:
+        if self.state_file is None:
+            return
+        try:
+            self.state_file.parent.mkdir(parents=True, exist_ok=True)
+            self.state_file.write_text(json.dumps({str(k): v for k, v in self._saved.items()}))
+        except OSError as e:
+            logger.warning("Cannot save %s: %s", self.state_file, e)
 
     @property
     def active(self) -> bool:
@@ -258,12 +313,15 @@ class DefaultDenyGuard:
         current = _read_attr(hub, "authorized_default")
         if current is None:
             return False
+        # A previous run that died without releasing left "0" behind
+        current = self._previous.get(str(hub), current)
         try:
             (hub / "authorized_default").write_text("0")
         except OSError as e:
             logger.error("Cannot set %s/authorized_default: %s", hub, e)
             return False
         self._saved[hub] = current
+        self._save_state()
         return True
 
     def release(self) -> None:
@@ -276,3 +334,6 @@ class DefaultDenyGuard:
             except OSError as e:
                 logger.error("Cannot restore %s/authorized_default: %s", hub, e)
         self._saved.clear()
+        self._previous = {}
+        if self.state_file is not None:
+            self.state_file.unlink(missing_ok=True)

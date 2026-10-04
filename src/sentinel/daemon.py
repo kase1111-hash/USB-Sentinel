@@ -109,7 +109,10 @@ class _AuditSeenView:
         self._daemon = daemon
 
     def is_first_seen(self, fingerprint: str) -> bool:
-        return not self._daemon.db.device_exists(fingerprint)
+        # Held devices were recorded but never allowed: still "new", or a
+        # re-plug would skip the review rules that held them.
+        device = self._daemon.db.get_device(fingerprint)
+        return device is None or str(device.trust_level) == TrustLevel.REVIEW.value
 
 
 def _process_alive(pid: int) -> bool:
@@ -335,6 +338,7 @@ class SentinelDaemon:
             self._interceptor = get_platform_interceptor(
                 block_during_analysis=self.config.interceptor.block_during_analysis,
                 analysis_timeout=float(self.config.interceptor.analysis_timeout),
+                state_file=Path(self.config.daemon.pid_file).parent / "authorized_default.json",
             )
         return self._interceptor
 
@@ -396,8 +400,15 @@ class SentinelDaemon:
 
         logger.info("Waiting for USB events...")
 
-    async def stop(self) -> None:
-        """Stop the daemon gracefully."""
+    async def stop(self, release: bool = True) -> None:
+        """
+        Stop the daemon.
+
+        Args:
+            release: Restore the kernel's default USB authorization. False on
+                an error exit, so new devices stay unbound until systemd
+                restarts the daemon (fail closed).
+        """
         if self._stopped:
             return
         self._stopped = True
@@ -412,9 +423,9 @@ class SentinelDaemon:
 
             await shutdown_websocket()
 
-        # Stop monitoring and restore the kernel's default authorization
+        # Stop monitoring and (normally) restore the kernel's default
         if self._interceptor is not None:
-            self._interceptor.stop()
+            self._interceptor.stop(release=release)
 
         # Close database
         if self._db is not None:
@@ -442,8 +453,12 @@ class SentinelDaemon:
         except asyncio.CancelledError:
             logger.info("Daemon loop cancelled")
         except Exception as e:
-            # Re-raised so the process exits non-zero and systemd restarts it
+            # Re-raised so the process exits non-zero and systemd restarts
+            # it; new devices stay unbound meanwhile.
             logger.error("Daemon error: %s", e, exc_info=True)
+            if watcher is not None:
+                watcher.cancel()
+            await self.stop(release=False)
             raise
         finally:
             if watcher is not None:

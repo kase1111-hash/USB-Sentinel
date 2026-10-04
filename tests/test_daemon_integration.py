@@ -687,3 +687,33 @@ class TestFailureExit:
             assert await run_daemon(config) == 1
         interceptor.stop.assert_called()
         assert not os.path.exists(config.daemon.pid_file)
+
+
+class TestHeldDeviceReplug:
+    @pytest.mark.asyncio
+    async def test_held_device_still_first_seen(self, work_dir, config):
+        """A held device must not skip `first_seen` review rules when re-plugged."""
+        policy_path = os.path.join(work_dir, "held.yaml")
+        with open(policy_path, "w") as f:
+            f.write(
+                "rules:\n"
+                "  - match: {first_seen: true, class: HID}\n"
+                "    action: review\n"
+                "  - match: {class: Audio}\n"
+                "    action: allow\n"
+                "  - match: '*'\n"
+                "    action: review\n"
+            )
+        config.policy.rules_file = policy_path
+        d = SentinelDaemon(config)
+        d._interceptor = MagicMock()
+
+        # HID + audio, no manufacturer: held on first plug
+        device = create_test_descriptor(
+            vid="4444", pid="5555", manufacturer=None, interfaces=[(0x03, 1, 1), (0x01, 1, 0)]
+        )
+        first = await d.handle_device_event(_make_event(device))
+        second = await d.handle_device_event(_make_event(device))
+
+        assert first["action"] == "review"
+        assert second["action"] == "review"

@@ -141,6 +141,9 @@ class USBMonitor:
         self._monitor: Any = None
         self._running = False
         self._enumerator = USBEnumerator()
+        # Called as soon as a root hub (new bus) is read off the socket,
+        # before queued device events are processed.
+        self.on_new_bus: Callable[[Path], None] | None = None
 
     def _ensure_context(self) -> None:
         """Initialize pyudev context if needed."""
@@ -262,8 +265,18 @@ class USBMonitor:
                 if device is None:
                     return
                 event = self._parse_udev_event(device)
-                if event is not None:
-                    queue.put_nowait(event)
+                if event is None:
+                    continue
+                if (
+                    event.event_type == EventType.ADD
+                    and Path(event.sys_path).name.startswith("usb")
+                    and self.on_new_bus is not None
+                ):
+                    try:
+                        self.on_new_bus(Path(event.sys_path))
+                    except Exception as e:
+                        logger.error("Failed to protect new bus %s: %s", event.sys_path, e)
+                queue.put_nowait(event)
 
         fd = self._monitor.fileno()
         loop.add_reader(fd, on_readable)
@@ -479,6 +492,7 @@ class USBInterceptor:
         block_during_analysis: bool = True,
         analysis_timeout: float = 10.0,
         sysfs_root: Path | None = None,
+        state_file: Path | None = None,
     ) -> None:
         """
         Initialize the interceptor.
@@ -494,7 +508,9 @@ class USBInterceptor:
         self.block_during_analysis = block_during_analysis
         self.analysis_timeout = analysis_timeout
         self.sysfs_root = sysfs_root
-        self._guard = sysfs.DefaultDenyGuard(sysfs_root)
+        self._guard = sysfs.DefaultDenyGuard(sysfs_root, state_file)
+        if block_during_analysis:
+            self.monitor.on_new_bus = self._guard.engage_hub
         self._event_handlers: list[Callable[[USBEvent], None]] = []
 
     def add_event_handler(self, handler: Callable[[USBEvent], None]) -> None:
@@ -562,10 +578,8 @@ class USBInterceptor:
         """Async iterator for USB device events (root hubs are handled here)."""
         async for event in self.monitor.monitor_events():
             if Path(event.sys_path).name.startswith("usb"):
-                # A root hub is a host controller appearing, not a device.
-                # Its bus starts out authorizing everything, so cover it.
-                if event.event_type == EventType.ADD and self._guard.active:
-                    self._guard.engage_hub(Path(event.sys_path))
+                # A root hub is a host controller appearing, not a device;
+                # the monitor already locked its bus down (on_new_bus).
                 continue
 
             yield event
@@ -585,6 +599,14 @@ class USBInterceptor:
             True if device was authorized successfully.
         """
         if event.sys_path:
+            if event.address and not sysfs.is_same_device(event.sys_path, event.bus, event.address):
+                logger.warning(
+                    "Not authorizing %s: the device there is no longer %d:%d",
+                    event.sys_path,
+                    event.bus,
+                    event.address,
+                )
+                return False
             return sysfs.set_authorized(event.sys_path, True)
         return self.authorizer.authorize(event.bus, event.address)
 
@@ -599,15 +621,23 @@ class USBInterceptor:
             return sysfs.set_authorized(event.sys_path, False)
         return self.authorizer.deauthorize(event.bus, event.address)
 
-    def stop(self) -> None:
-        """Stop the interceptor and restore the kernel's default authorization."""
+    def stop(self, release: bool = True) -> None:
+        """
+        Stop the interceptor.
+
+        Args:
+            release: Restore the kernel's default authorization. Pass False
+                on an error exit to keep new devices unbound until restart.
+        """
         self.monitor.stop()
-        self._guard.release()
+        if release:
+            self._guard.release()
 
 
 def get_platform_interceptor(
     block_during_analysis: bool = True,
     analysis_timeout: float = 10.0,
+    state_file: Path | None = None,
 ) -> USBInterceptor:
     """
     Get the appropriate interceptor for the current platform.
@@ -625,6 +655,7 @@ def get_platform_interceptor(
         return USBInterceptor(
             block_during_analysis=block_during_analysis,
             analysis_timeout=analysis_timeout,
+            state_file=state_file,
         )
     elif system == "windows":
         raise NotImplementedError("Windows interceptor not yet implemented")

@@ -377,3 +377,60 @@ def test_release_tolerates_removed_bus(sys_root: Path, tmp_path: Path, caplog) -
 
     assert "Cannot restore" not in caplog.text
     assert (sys_root / "usb1" / "authorized_default").read_text() == "1"
+
+
+class TestReviewRegressions:
+    def test_malformed_descriptor_cannot_hide_next_configuration(self) -> None:
+        """A bogus length in config 1 must not swallow config 2 (the kernel parses each)."""
+        bogus = bytes([40, 0x24]) + b"\x00" * 3  # claims 40 bytes, config holds 5
+        config1 = interface(0, 0, 0, 0x01, 1, 0) + bogus
+        config2 = interface(0, 0, 1, 0x03, 1, 1) + endpoint(0x81, 0x03, 8, 10)
+        raw = (
+            device_descriptor(0x1234, 0x0001)
+            + config_descriptor(9 + len(config1), 1)
+            + config1
+            + config_descriptor(9 + len(config2), 1)
+            + config2
+        )
+        classes = [i.interface_class for i in sysfs.parse_interfaces(raw)]
+        assert classes == [0x01, 0x03]
+
+    def test_verdict_not_applied_to_replacement_device(self, sys_root: Path) -> None:
+        """If the port now holds a different device, an old ALLOW must not bind it."""
+        path = make_device(sys_root, "1-6", KEYBOARD, authorized="0")
+        (path / "devnum").write_text("8\n")  # re-enumerated after the event
+        event = USBEvent(EventType.ADD, 1, 7, "", str(path))
+
+        assert USBInterceptor(sysfs_root=sys_root).allow_device(event) is False
+        assert sysfs.is_authorized(path) is False
+
+    def test_original_default_survives_unclean_exit(self, sys_root: Path, tmp_path: Path) -> None:
+        state = tmp_path / "run" / "authorized_default.json"
+        sysfs.DefaultDenyGuard(sys_root, state).engage()  # then SIGKILL: no release
+
+        guard = sysfs.DefaultDenyGuard(sys_root, state)
+        guard.engage()
+        guard.release()
+
+        assert (sys_root / "usb1" / "authorized_default").read_text() == "1"
+        assert not state.exists()
+
+    def test_new_bus_covered_even_if_none_at_startup(self, tmp_path: Path) -> None:
+        root = tmp_path / "empty"
+        root.mkdir()
+        interceptor = USBInterceptor(sysfs_root=root)
+        interceptor.monitor.start = lambda: None
+        interceptor.start()
+
+        dock = tmp_path / "usb4"
+        dock.mkdir()
+        (dock / "authorized_default").write_text("1\n")
+        interceptor.monitor.on_new_bus(dock)
+        assert (dock / "authorized_default").read_text() == "0"
+
+    def test_error_exit_keeps_default_deny(self, sys_root: Path) -> None:
+        interceptor = USBInterceptor(sysfs_root=sys_root)
+        interceptor.monitor.start = lambda: None
+        interceptor.start()
+        interceptor.stop(release=False)
+        assert (sys_root / "usb1" / "authorized_default").read_text() == "0"

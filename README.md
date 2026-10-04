@@ -34,10 +34,9 @@ than querying the device, and decides:
    - 76-100: **blocked**
 
 The device's sysfs `authorized` flag is then set accordingly. Devices that were
-already attached when the daemon started are left alone. Stopping the daemon,
-or an exit on error, restores the kernel's default; systemd restarts it after an
-error. If the daemon is killed outright, new devices stay unbound (fail closed)
-until it restarts and evaluates them.
+already attached when the daemon started are left alone. Stopping the daemon
+restores the kernel's default. If it exits on an error or is killed, new devices
+stay unbound (fail closed) until systemd restarts it and it evaluates them.
 
 ## Install
 
@@ -171,7 +170,11 @@ heuristics, so treat these numbers as an upper bound. Run
   exactly (vendor, product, strings, interfaces) is indistinguishable from
   it. There is no keystroke-timing or traffic analysis.
 - **Devices present at startup are not evaluated.** Run `usb-sentinel scan`
-  to review them.
+  to review them. This includes a device plugged in during the second or two
+  of a `systemctl restart`.
+- **New host controllers** (a Thunderbolt dock, for example) are locked down
+  as soon as the daemon sees them, but a device already behind the dock can bind
+  first. It is still evaluated and deauthorized if it fails.
 - **Linux only**, and it needs root to write sysfs.
 - **No electrical protection.** USB-killer style devices are out of scope.
 
