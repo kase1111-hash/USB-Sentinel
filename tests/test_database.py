@@ -345,6 +345,34 @@ class TestDatabaseIntegrity:
         assert result is True
 
 
+class TestAppendOnlyAuditLog:
+    """The events table must reject UPDATE and DELETE at the SQLite level."""
+
+    @pytest.mark.parametrize(
+        "statement",
+        ["DELETE FROM events", "UPDATE events SET verdict = 'allow'"],
+    )
+    def test_events_cannot_be_rewritten(self, test_db: AuditDatabase, statement: str) -> None:
+        import sqlite3
+
+        test_db.add_device(fingerprint="fp-audit", vid="046d", pid="c534")
+        test_db.log_event(device_fingerprint="fp-audit", event_type="blocked", verdict="block")
+
+        conn = sqlite3.connect(test_db.db_path)
+        try:
+            with pytest.raises(sqlite3.IntegrityError, match="not permitted"):
+                conn.execute(statement)
+        finally:
+            conn.close()
+
+        assert len(test_db.get_events(device_fingerprint="fp-audit")) == 1
+
+    def test_reopening_existing_database(self, test_db: AuditDatabase) -> None:
+        """Trigger creation is idempotent."""
+        reopened = AuditDatabase(test_db.db_path)
+        reopened.close()
+
+
 class TestPydanticSchemas:
     """Tests for Pydantic schemas."""
 

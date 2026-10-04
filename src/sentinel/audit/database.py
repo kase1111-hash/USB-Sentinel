@@ -22,7 +22,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from sentinel.audit.models import (
-    APPEND_ONLY_TRIGGER,
+    APPEND_ONLY_TRIGGERS,
     Base,
     Device,
     Event,
@@ -95,16 +95,9 @@ class AuditDatabase:
         Base.metadata.create_all(self.engine)
 
         # Add append-only triggers
-        with self.engine.connect() as conn:
-            for statement in APPEND_ONLY_TRIGGER.split(";"):
-                statement = statement.strip()
-                if statement:
-                    try:
-                        conn.execute(text(statement))
-                    except Exception as e:
-                        # Trigger may already exist
-                        logger.debug("Trigger creation: %s", e)
-            conn.commit()
+        with self.engine.begin() as conn:
+            for statement in APPEND_ONLY_TRIGGERS:
+                conn.execute(text(statement))
 
         logger.info("Database schema initialized: %s", self.db_path)
 
