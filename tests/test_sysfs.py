@@ -360,3 +360,20 @@ class TestEventMonitoring:
         assert (dock / "authorized_default").read_text() == "0"
         interceptor.stop()
         assert (dock / "authorized_default").read_text() == "1"
+
+
+def test_release_tolerates_removed_bus(sys_root: Path, tmp_path: Path, caplog) -> None:
+    guard = sysfs.DefaultDenyGuard(sys_root)
+    dock = tmp_path / "devices" / "usb9"
+    dock.mkdir()
+    (dock / "authorized_default").write_text("1\n")
+    guard.engage()
+    guard.engage_hub(dock)
+
+    import shutil
+
+    shutil.rmtree(dock)
+    guard.release()
+
+    assert "Cannot restore" not in caplog.text
+    assert (sys_root / "usb1" / "authorized_default").read_text() == "1"

@@ -35,9 +35,9 @@ PrivateDevices=no
 Environment=PYTHONUNBUFFERED=1
 EnvironmentFile=-/etc/usb-sentinel/environment
 
-# Restart policy. If the daemon crashes, new USB devices stay unauthorized
-# (fail closed) until it restarts and evaluates them. A clean stop
-# restores the kernel's default authorization.
+# Restart policy. A stop or an exit on error restores the kernel's default
+# authorization. If the daemon is killed outright, new USB devices stay
+# unauthorized (fail closed) until it restarts and evaluates them.
 Restart=on-failure
 RestartSec=2
 

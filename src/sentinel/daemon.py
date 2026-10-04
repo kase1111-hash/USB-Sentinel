@@ -442,7 +442,9 @@ class SentinelDaemon:
         except asyncio.CancelledError:
             logger.info("Daemon loop cancelled")
         except Exception as e:
+            # Re-raised so the process exits non-zero and systemd restarts it
             logger.error("Daemon error: %s", e, exc_info=True)
+            raise
         finally:
             if watcher is not None:
                 watcher.cancel()

@@ -34,9 +34,10 @@ than querying the device, and decides:
    - 76-100: **blocked**
 
 The device's sysfs `authorized` flag is then set accordingly. Devices that were
-already attached when the daemon started are left alone. A clean stop restores
-the kernel's default. If the daemon crashes, new devices stay unbound (fail
-closed) until it restarts and evaluates them.
+already attached when the daemon started are left alone. Stopping the daemon,
+or an exit on error, restores the kernel's default; systemd restarts it after an
+error. If the daemon is killed outright, new devices stay unbound (fail closed)
+until it restarts and evaluates them.
 
 ## Install
 

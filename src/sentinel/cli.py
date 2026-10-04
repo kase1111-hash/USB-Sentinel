@@ -629,8 +629,9 @@ def cmd_scan(args: argparse.Namespace) -> int:
 
     try:
         rows = asyncio.run(evaluate_all())
-    except OSError as e:
-        print(f"Cannot read the audit database ({e}); run as root?")
+    except Exception as e:
+        print(f"Cannot evaluate devices: {e}")
+        print("The audit database must be readable; run as root?")
         return 1
 
     if getattr(args, "json", False):

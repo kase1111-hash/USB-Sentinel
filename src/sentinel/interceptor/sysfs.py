@@ -271,6 +271,8 @@ class DefaultDenyGuard:
         for hub, value in self._saved.items():
             try:
                 (hub / "authorized_default").write_text(value)
+            except FileNotFoundError:
+                pass  # bus went away (e.g. dock unplugged)
             except OSError as e:
                 logger.error("Cannot restore %s/authorized_default: %s", hub, e)
         self._saved.clear()

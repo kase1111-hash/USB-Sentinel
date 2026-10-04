@@ -660,3 +660,30 @@ class TestAlerts:
         assert len(received) == 1
         assert received[0]["event"] == "device_blocked"
         assert received[0]["vid"] == "dead"
+
+
+class TestFailureExit:
+    @pytest.mark.asyncio
+    async def test_loop_error_exits_nonzero_and_cleans_up(self, config, work_dir):
+        """systemd only restarts on failure, so an event-loop crash must not exit 0."""
+        from sentinel.daemon import run_daemon
+
+        config.daemon.pid_file = os.path.join(work_dir, "sentinel.pid")
+        config.daemon.log_file = None
+        config.policy.hot_reload = False
+
+        interceptor = MagicMock()
+        interceptor.start.return_value = []
+
+        async def broken_events():
+            raise OSError("netlink socket closed")
+            yield
+
+        interceptor.events = broken_events
+
+        from unittest.mock import patch
+
+        with patch("sentinel.daemon.get_platform_interceptor", return_value=interceptor):
+            assert await run_daemon(config) == 1
+        interceptor.stop.assert_called()
+        assert not os.path.exists(config.daemon.pid_file)
