@@ -19,7 +19,7 @@ INSTALL_PREFIX="${INSTALL_PREFIX:-/opt/usb-sentinel}"
 CONFIG_DIR="${CONFIG_DIR:-/etc/usb-sentinel}"
 DATA_DIR="${DATA_DIR:-/var/lib/usb-sentinel}"
 BIN_DIR="${BIN_DIR:-/usr/local/bin}"
-SYSTEMD_DIR="/etc/systemd/system"
+SYSTEMD_DIR="${SYSTEMD_DIR:-/etc/systemd/system}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
@@ -97,7 +97,8 @@ install_config() {
 
     for file in sentinel.yaml policy.yaml; do
         if [[ ! -f "$CONFIG_DIR/$file" ]]; then
-            cp "$PROJECT_DIR/config/$file" "$CONFIG_DIR/$file"
+            sed -e "s|/etc/usb-sentinel|$CONFIG_DIR|g" -e "s|/var/lib/usb-sentinel|$DATA_DIR|g" \
+                "$PROJECT_DIR/config/$file" > "$CONFIG_DIR/$file"
             chmod 600 "$CONFIG_DIR/$file"
             log_info "Created $CONFIG_DIR/$file"
         else
@@ -127,14 +128,16 @@ ENV
 install_systemd() {
     log_info "Installing systemd service..."
 
-    sed "s|/opt/usb-sentinel|$INSTALL_PREFIX|g" \
+    sed -e "s|/opt/usb-sentinel|$INSTALL_PREFIX|g" \
+        -e "s|/etc/usb-sentinel|$CONFIG_DIR|g" \
+        -e "s|/var/lib/usb-sentinel|$DATA_DIR|g" \
         "$SCRIPT_DIR/usb-sentinel.service" > "$SYSTEMD_DIR/usb-sentinel.service"
     chmod 644 "$SYSTEMD_DIR/usb-sentinel.service"
 
-    if command -v systemctl &> /dev/null; then
+    if [[ -d /run/systemd/system ]]; then
         systemctl daemon-reload
     else
-        log_warn "systemctl not found - start the daemon with: sentinel-daemon -c $CONFIG_DIR/sentinel.yaml"
+        log_warn "systemd is not running - start the daemon with: sentinel-daemon -c $CONFIG_DIR/sentinel.yaml"
     fi
 }
 
@@ -181,9 +184,11 @@ print_instructions() {
 uninstall() {
     log_info "Uninstalling USB Sentinel..."
 
-    if command -v systemctl &> /dev/null; then
+    if [[ -d /run/systemd/system ]]; then
         systemctl disable --now usb-sentinel 2> /dev/null || true
-        rm -f "$SYSTEMD_DIR/usb-sentinel.service"
+    fi
+    rm -f "$SYSTEMD_DIR/usb-sentinel.service"
+    if [[ -d /run/systemd/system ]]; then
         systemctl daemon-reload
     fi
 
