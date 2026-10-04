@@ -1,122 +1,191 @@
 # USB Sentinel
 
-LLM-Integrated USB Firewall System
+A USB firewall daemon for Linux. New USB devices stay unbound (no driver, so a
+keyboard cannot type and a disk cannot mount) until USB Sentinel has decided
+what they are. Decisions combine YAML policy rules, a descriptor validator and
+local heuristics, and optionally an LLM (Claude), and every decision is logged
+to an append-only audit database.
 
-A constitutional security layer that interposes between the operating system and physical USB subsystem. USB Sentinel combines deterministic rule-based policy enforcement with LLM-assisted heuristic analysis to detect and prevent USB-based attack vectors including BadUSB, Rubber Ducky scripts, and firmware-level exploits.
+It targets BadUSB-style attacks: keystroke injectors (Rubber Ducky, Teensy,
+Digispark, P4wnP1), HID devices with hidden storage or network interfaces,
+devices that claim a vendor ID their descriptor strings contradict, and known
+attack hardware.
 
-## Overview
+## How a device is decided
 
-USB Sentinel operates on the principle of **zero-trust device enumeration**: no USB device gains system access until it passes both static policy checks and behavioral analysis. The LLM component functions as a specialized security analyst agent, evaluating device descriptors against known attack patterns and historical baselines.
+When a device is plugged in, the kernel enumerates it but binds no driver,
+because USB Sentinel sets `authorized_default=0` on every USB bus while it runs.
+The daemon reads the descriptors the kernel already cached in sysfs, rather
+than querying the device, and decides:
 
-## Features
+1. **Your decision.** Devices you marked with `usb-sentinel devices trust`
+   are allowed (`trusted`) or blocked (`blocked`), whatever the policy says.
+2. **Policy rules** (`/etc/usb-sentinel/policy.yaml`, first match wins). A
+   `block` is final. An `allow` is final unless the device's manufacturer
+   string contradicts its vendor ID or its descriptor is seriously anomalous,
+   in which case it is analyzed like a `review`.
+3. **Review.** The descriptor validator and local heuristics score the device
+   from 0 to 100. If an API key is configured, the LLM scores it too. The
+   highest score wins, so the LLM can raise risk but cannot talk a device below
+   what the local checks found. Devices that were never allowed before get a
+   penalty.
+   - 0-50: **allowed**
+   - 51-75: **held**, kept unbound until you decide
+   - 76-100: **blocked**
 
-- Intercept all USB device enumeration events before OS-level driver binding
-- Enforce configurable policies based on VID/PID, device class, and descriptor attributes
-- Analyze device behavior patterns using LLM-powered threat classification
-- Real-time audit logging with forensic-grade detail
-- Sandboxed device testing via virtual USB layer
+The device's sysfs `authorized` flag is then set accordingly. Devices that were
+already attached when the daemon started are left alone. A clean stop restores
+the kernel's default. If the daemon crashes, new devices stay unbound (fail
+closed) until it restarts and evaluates them.
 
-## Threat Model
+## Install
 
-USB Sentinel addresses the following attack categories:
+Requirements: Linux, Python 3.10+, root.
 
-| Attack Vector | Description | Detection Method |
-|---------------|-------------|------------------|
-| BadUSB / Rubber Ducky | HID devices injecting keystrokes or commands | Behavioral timing analysis, keystroke pattern detection |
-| Class Spoofing | Device claiming multiple incompatible classes | Descriptor consistency validation |
-| Firmware Manipulation | Modified firmware with malicious payloads | Vendor string anomaly detection, signature verification |
-| Data Exfiltration | Storage devices with hidden partitions | Endpoint enumeration analysis |
-| Power Surge Attacks | USB killers and overcurrent devices | Power draw monitoring (hardware-assisted) |
+```bash
+git clone https://github.com/kase1111-hash/USB-Sentinel
+cd USB-Sentinel
+sudo scripts/install.sh
+```
 
-## Architecture
+The installer puts a virtualenv in `/opt/usb-sentinel`, configuration in
+`/etc/usb-sentinel`, the database in `/var/lib/usb-sentinel`, and a systemd
+unit. `sudo scripts/install.sh --uninstall` removes everything except
+configuration and data.
 
-USB Sentinel employs a five-layer architecture following the principle of defense-in-depth:
+LLM analysis is optional. To enable it, put your key in
+`/etc/usb-sentinel/environment`:
 
-| Layer | Component | Technology | Function |
-|-------|-----------|------------|----------|
-| L1 | Event Interceptor | libusb / usbmon / udev | Capture raw USB events before driver binding |
-| L2 | Policy Engine | Python + YAML rules | Deterministic allow/block based on device attributes |
-| L3 | LLM Analyzer | Claude API / local llama.cpp | Heuristic threat assessment and anomaly detection |
-| L4 | Virtual USB Proxy | usbip / VHCI | Sandboxed device inspection and traffic replay |
-| L5 | Audit & Dashboard | SQLite + FastAPI + React | Logging, visualization, and incident response |
+```bash
+ANTHROPIC_API_KEY=sk-ant-...
+```
 
-### Data Flow
+## Use
 
-1. Kernel notifies udev of device insertion event
-2. Event Interceptor captures device descriptor before driver loads
-3. Policy Engine evaluates against static rules (fast path)
-4. If policy result is REVIEW, LLM Analyzer performs deep inspection
-5. Final decision (ALLOW/BLOCK/SANDBOX) returned to Policy Engine
-6. udev rule executes corresponding action (bind driver or reject)
-7. Event logged to audit database with full descriptor dump
+Preview what the daemon would decide for the devices attached now (changes
+nothing):
 
-## Policy Configuration
+```bash
+sudo usb-sentinel scan
+```
 
-Policies are defined in YAML format:
+Start it, and enable it at boot:
+
+```bash
+sudo systemctl enable --now usb-sentinel
+journalctl -u usb-sentinel -f
+```
+
+Each decision is logged with its reason:
+
+```
+ALLOWED 046d:c31c 'USB Keyboard': Risk 40/100 (validator=0, heuristics=25, never allowed): allowed
+BLOCKED 03eb:2ff4 'ATmega32U4': Risk 100/100 (validator=100, heuristics=25, never allowed): blocked
+HELD 1c4f:0002 'USB Keyboard': Risk 60/100 (...): held. To allow it: usb-sentinel devices trust 4603dd7e6f9f3f2e trusted
+```
+
+When a device is held:
+
+```bash
+sudo usb-sentinel status                        # shows how many are held
+sudo usb-sentinel devices list --trust review   # which ones
+sudo usb-sentinel devices trust <fingerprint> trusted
+```
+
+`trusted` and `blocked` take effect immediately if the device is attached, and
+apply every time it is plugged in again. Other commands:
+
+| Command | What it does |
+|---------|--------------|
+| `usb-sentinel events [-t blocked\|reviewed\|allowed] [-n 50]` | Audit log |
+| `usb-sentinel devices show <fingerprint>` | Device details |
+| `usb-sentinel policy validate` | Check the policy file |
+| `usb-sentinel policy test <vid> <pid> [--class HID] [--product ...]` | Which rule a device would hit |
+| `usb-sentinel policy reload` | Reload the policy in the running daemon (SIGHUP) |
+| `usb-sentinel export events --format csv` | Export the audit log |
+
+## Policy
+
+Rules are evaluated top to bottom; the first match decides. All keys in a
+match must hold. Unknown keys are rejected when the policy loads. A typo
+must never silently widen a rule to every device.
 
 ```yaml
 rules:
-  # Whitelist known trusted devices by VID:PID
-  - match:
-      vid: '046d'
-      pid: 'c534'
+  - match: {vid: '046d', pid: 'c534'}
     action: allow
     comment: 'Logitech Unifying Receiver'
 
-  # Block known malicious devices
-  - match:
-      vid: '1a86'
-      pid: '7523'
+  - match: {vid: '1a86', pid: '7523'}
     action: block
     comment: 'CH340 - common in attack hardware'
 
-  # Review any HID device with storage endpoints
-  - match:
-      class: 'HID'
-      has_storage_endpoint: true
+  - match: {class: HID, has_storage_endpoint: true}
     action: review
-    comment: 'Suspicious class combination'
+    comment: 'HID with storage'
 
-  # Default: review unknown devices
+  - match: {manufacturer: null}   # null = device reports no manufacturer
+    action: review
+
   - match: '*'
     action: review
 ```
 
-## LLM Risk Scoring
+The shipped [`config/policy.yaml`](config/policy.yaml) lists every match key.
+The daemon reloads the file when it changes. An invalid file is rejected and
+the previous policy stays active.
 
-| Score Range | Verdict | Action Taken |
-|-------------|---------|--------------|
-| 0-25 | ALLOW | Device permitted; logged as low-risk |
-| 26-50 | ALLOW (MONITORED) | Device permitted with enhanced logging |
-| 51-75 | SANDBOX | Device routed through virtual USB layer |
-| 76-100 | BLOCK | Device rejected; alert generated |
+## Configuration
 
-## Repository Structure
+[`config/sentinel.yaml`](config/sentinel.yaml) is commented. The settings
+you are most likely to change:
 
+| Setting | Default | Meaning |
+|---------|---------|---------|
+| `interceptor.block_during_analysis` | `true` | Keep new devices unbound until decided |
+| `interceptor.analysis_timeout` | `10` | Seconds to wait for the LLM before using local scores only |
+| `analyzer.model` | `claude-sonnet-5-5` | Model for LLM analysis |
+| `alerts.methods.webhook` | `null` | URL that receives a JSON POST per blocked or held device |
+| `api.enabled` | `false` | REST API and WebSocket for the dashboard |
+
+## Detection benchmark
+
+`tests/benchmark` runs 25 attack-device and 28 benign-device descriptors
+through the daemon's own decision code with the shipped policy and no API key:
+
+| | Attacks stopped | Benign devices stopped |
+|---|---|---|
+| Policy rules only, unresolved reviews allowed | 4/25 | 0/28 |
+| Policy rules only, unresolved reviews held | 25/25 | 18/28 |
+| **USB Sentinel (policy + local analysis)** | **25/25** | **1/28 (held, not blocked)** |
+
+The held benign device is a no-name keyboard whose product string is literally
+"USB Keyboard". The descriptors are synthetic and were written alongside the
+heuristics, so treat these numbers as an upper bound. Run
+`pytest tests/benchmark -s -k report` for the per-device table.
+
+## Limitations
+
+- **Descriptor-based.** A device that copies a trusted device's descriptors
+  exactly (vendor, product, strings, interfaces) is indistinguishable from
+  it. There is no keystroke-timing or traffic analysis.
+- **Devices present at startup are not evaluated.** Run `usb-sentinel scan`
+  to review them.
+- **Linux only**, and it needs root to write sysfs.
+- **No electrical protection.** USB-killer style devices are out of scope.
+
+## Development
+
+```bash
+python -m venv venv && . venv/bin/activate
+pip install -e ".[dev]"
+pytest tests/
+ruff check src/ tests/ && ruff format --check src/ tests/
 ```
-usb-sentinel/
-├── src/
-│   └── sentinel/
-│       ├── interceptor/     # USB event capture (Linux/Windows)
-│       ├── policy/          # Rule evaluation and YAML parsing
-│       ├── analyzer/        # LLM integration and risk scoring
-│       ├── proxy/           # USB/IP and traffic capture
-│       ├── audit/           # SQLite logging and data models
-│       └── api/             # FastAPI endpoints and WebSocket
-├── dashboard/               # React frontend
-├── config/                  # Policy and daemon configuration
-├── scripts/                 # Installation and udev rules
-└── tests/                   # Test suite and fixtures
-```
 
-## Security Considerations
-
-- **Daemon Security**: Runs with minimal privileges using capability-restricted process namespace
-- **Policy Protection**: Root-owned config files with integrity monitoring
-- **LLM Security**: Input sanitization against prompt injection; output validation against expected schema
-- **Audit Integrity**: Append-only database with optional remote logging
-- **Dashboard Auth**: mTLS for API; no default credentials
+The optional React dashboard in `dashboard/` talks to the REST API
+(`api.enabled: true`).
 
 ## License
 
-MIT License
+MIT

@@ -1,5 +1,10 @@
 # USB Sentinel Implementation Guide
 
+> This is the original implementation plan. For installing and running USB Sentinel
+> as it exists now, see [README.md](README.md); the udev hook described below was
+> replaced by kernel default-deny (`authorized_default`).
+
+
 A 10-phase development guide for building the LLM-integrated USB firewall system.
 
 ---

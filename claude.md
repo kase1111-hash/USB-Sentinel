@@ -2,7 +2,13 @@
 
 ## Project Overview
 
-USB-Sentinel is an LLM-integrated USB firewall that operates as a constitutional security layer between the operating system and USB subsystem. It combines deterministic rule-based policy enforcement with LLM-assisted heuristic analysis to detect and prevent USB-based attacks (BadUSB, Rubber Ducky, firmware exploits, class spoofing, data exfiltration).
+USB-Sentinel is a Linux USB firewall daemon. New USB devices stay unbound
+(kernel `authorized_default=0`) until the daemon decides on them from YAML
+policy rules, a descriptor validator, local heuristics, and optionally the
+Claude API. Decisions are enforced through sysfs `authorized` flags and logged
+to an append-only SQLite audit database. Targets BadUSB-style attacks
+(keystroke injectors, HID+storage combos, vendor spoofing, known attack
+hardware).
 
 **Status**: Alpha (v0.1.0) | **License**: MIT | **Python**: 3.10+
 
@@ -13,66 +19,73 @@ USB-Sentinel is an LLM-integrated USB firewall that operates as a constitutional
 python -m venv venv && source venv/bin/activate
 pip install -e ".[dev]"
 
-# Run tests
-pytest tests/ -v --cov=sentinel
+# Run tests (no USB hardware or API key needed)
+pytest tests/
 
-# Run linting
-ruff check src/ && ruff format --check src/
+# Lint and format (CI fails on either)
+ruff check src/ tests/ && ruff format --check src/ tests/
 
-# Type checking
-mypy src/sentinel
+# Type checking (non-blocking in CI)
+mypy src/sentinel --ignore-missing-imports
 
-# Start daemon (requires root/CAP_SYS_RAWIO)
-sudo usb-sentinel start
-
-# Dashboard (separate terminal)
-cd dashboard && npm install && npm run dev
+# Preview decisions for attached devices, then run the daemon (root)
+sudo usb-sentinel scan
+sudo sentinel-daemon -c config/sentinel.yaml
 ```
 
 ## Architecture
 
-5-layer architecture with data flow: USB Event → Policy Engine → LLM Analyzer → Audit DB → Dashboard
+Data flow: udev event → sysfs descriptors → decision → sysfs `authorized` → audit DB
 
 | Layer | Location | Purpose |
 |-------|----------|---------|
-| L1 Interceptor | `src/sentinel/interceptor/` | USB event capture via pyudev/libusb before driver binding |
-| L2 Policy Engine | `src/sentinel/policy/` | YAML-based deterministic allow/block/review rules |
-| L3 LLM Analyzer | `src/sentinel/analyzer/` | Claude API heuristic threat assessment |
-| L4 Virtual Proxy | `src/sentinel/proxy/` | USB/IP sandboxed device inspection |
-| L5 Audit/API | `src/sentinel/audit/`, `api/` | SQLite logging, FastAPI REST, React dashboard |
+| L1 Interceptor | `src/sentinel/interceptor/` | pyudev monitor; descriptors read from sysfs; enforcement via `authorized` / `authorized_default` |
+| L2 Policy Engine | `src/sentinel/policy/` | YAML rules, first match wins: allow / block / review |
+| L3 Analyzer | `src/sentinel/analyzer/`, `interceptor/validator.py` | Descriptor validator + local heuristics, optional Claude scoring |
+| L4 Audit/API | `src/sentinel/audit/`, `api/` | SQLite audit log, optional FastAPI REST + WebSocket for `dashboard/` |
+
+The decision pipeline lives in `SentinelDaemon.evaluate()` (`daemon.py`; the
+module docstring describes the order). Key invariants:
+
+- Operator trust (`devices trust`) overrides policy.
+- The LLM score is combined with `max()`. Device strings reach the prompt, so
+  the LLM may raise risk but never lower it below the local checks.
+- Scores 51-75 hold the device unauthorized (trust level `review`); only the
+  operator releases it.
+- The policy parser rejects unknown keys and empty matches: a dropped key
+  would widen a rule to every device.
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `src/sentinel/daemon.py` | Main orchestrator (`SentinelDaemon` class) |
-| `src/sentinel/core/processor.py` | Integrated device evaluation pipeline |
-| `src/sentinel/policy/engine.py` | Policy rule evaluation (`PolicyEngine`, `RuleMatcher`) |
-| `src/sentinel/analyzer/llm.py` | Claude API integration (`LLMAnalyzer`) |
+| `src/sentinel/daemon.py` | `SentinelDaemon`: lifecycle, event handling, decision pipeline |
+| `src/sentinel/interceptor/sysfs.py` | Descriptor parsing from sysfs, `DefaultDenyGuard` |
+| `src/sentinel/interceptor/linux.py` | `USBMonitor` (pyudev via event loop), `USBInterceptor` |
+| `src/sentinel/interceptor/validator.py` | Descriptor anomaly checks and scores |
+| `src/sentinel/policy/parser.py` | Strict policy YAML parser |
+| `src/sentinel/policy/engine.py` | Rule evaluation (`PolicyEngine`, `RuleMatcher`) |
+| `src/sentinel/analyzer/llm.py` | Claude API (`LLMAnalyzer`), local heuristics (`MockLLMAnalyzer`) |
+| `src/sentinel/analyzer/prompts.py` | Prompts, input sanitization, response validation |
 | `src/sentinel/audit/database.py` | SQLite operations (`AuditDatabase`) |
-| `src/sentinel/api/routes.py` | FastAPI endpoints |
-| `src/sentinel/interceptor/descriptors.py` | USB descriptor parsing (`DeviceDescriptor`) |
-| `config/sentinel.yaml` | Daemon configuration |
-| `config/policy.yaml` | Default security policy rules |
+| `src/sentinel/cli.py` | `usb-sentinel` commands |
+| `src/sentinel/core/processor.py` | Standalone `DeviceProcessor` library (not used by the daemon) |
+| `config/sentinel.yaml` | Daemon configuration (commented) |
+| `config/policy.yaml` | Default policy; header lists every match key |
+| `scripts/install.sh`, `scripts/usb-sentinel.service` | venv install, systemd unit |
 
 ## Build & Test Commands
 
 ```bash
-# Full test suite with coverage
-pytest tests/ -v --cov=sentinel --cov-report=html
+# Full test suite with coverage (what CI runs)
+pytest tests/ -v --cov=sentinel --cov-report=xml
 
-# Single test file
-pytest tests/test_policy.py -v
-
-# Async tests use pytest-asyncio (auto mode)
-pytest tests/test_api.py -v
+# Detection benchmark with per-device table
+pytest tests/benchmark -s -k report
 
 # Lint and format
 ruff check src/ tests/
 ruff format src/ tests/
-
-# Type check (strict mode)
-mypy src/sentinel
 
 # Build package
 python -m build
@@ -81,145 +94,102 @@ python -m build
 ## Code Conventions
 
 ### Python Style
-- **Type hints required** on all functions (MyPy enforces `disallow_untyped_defs`)
+- **Type hints** on all functions
 - **Line length**: 100 characters
-- **Imports**: Use `from __future__ import annotations`, organize by stdlib/third-party/local
+- **Imports**: `from __future__ import annotations`, stdlib / third-party / local
 - **Naming**: `snake_case` for functions/variables, `PascalCase` for classes/enums
-- **Dataclasses**: Preferred for data structures
-- **Enums**: Use for categorical values (Action, EventType, TrustLevel, Verdict)
-
-### File Template
-```python
-"""Module docstring."""
-
-from __future__ import annotations
-
-import logging
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from sentinel.policy.models import PolicyRule
-
-logger = logging.getLogger(__name__)
-```
+- **Logging**: %-style arguments, not f-strings
+- **Dataclasses** for data structures, **Enums** for categorical values
 
 ### Testing Patterns
-- Fixtures in `tests/conftest.py` (temp dirs, sample devices, mock configs)
-- Mock external APIs (Anthropic, USB hardware)
-- Use `pytest.mark.asyncio` for async tests (auto mode enabled)
+- Fixtures in `tests/conftest.py`; daemon tests use a real temp SQLite DB and a
+  `MagicMock` interceptor
+- `tests/test_sysfs.py` builds a fake `/sys/bus/usb/devices` tree with real
+  descriptor bytes; reuse `make_device()` for anything touching sysfs
+- Mock the Anthropic client with typed content blocks
+  (`SimpleNamespace(type="text", text=...)`), not bare `MagicMock`s
+- Async tests run in pytest-asyncio auto mode
 
 ## Common Development Tasks
 
 ### Adding a Policy Rule
-Edit `config/policy.yaml`:
+Edit `config/policy.yaml`, then `usb-sentinel policy validate`:
 ```yaml
 rules:
-  - name: block_suspicious_hid
-    match:
-      class: 0x03  # HID
-      endpoints: { min: 5 }  # Too many endpoints
+  - match:
+      class: HID
+      endpoint_count_gt: 4
     action: block
-    comment: "Block HID devices with excessive endpoints"
+    comment: "HID device with excessive endpoints"
 ```
 
-### Extending LLM Analyzer
-1. Add new analysis method to `src/sentinel/analyzer/llm.py`
-2. Update prompts in `src/sentinel/analyzer/prompts.py`
-3. Add tests in `tests/test_analyzer.py` with mocked API responses
+### Adding a Match Key
+1. Field on `MatchCondition` (`policy/models.py`)
+2. Check in `RuleMatcher.matches()` (`policy/engine.py`)
+3. Parse and validate in `parse_match_condition()` and add to `MATCH_KEYS`
+   (`policy/parser.py`), and to `MatchConditionSchema` (`api/schemas.py`)
+4. Document it in the `config/policy.yaml` header
+
+### Extending the Analyzer
+1. Local signals: `interceptor/validator.py` or `MockLLMAnalyzer` (`analyzer/llm.py`)
+2. LLM prompt: `analyzer/prompts.py`; device strings go through `sanitize_input()`
+3. Check the effect on `tests/benchmark` (it runs the real pipeline)
 
 ### Adding an API Endpoint
-1. Add route to `src/sentinel/api/routes.py`
-2. Define schemas in `src/sentinel/api/schemas.py`
-3. Add tests in `tests/test_api.py` using `httpx.AsyncClient`
-
-### Modifying the Dashboard
-1. Components in `dashboard/src/components/`
-2. API client in `dashboard/src/api.ts`
-3. WebSocket hook in `dashboard/src/hooks/useWebSocket.tsx`
-4. Run `npm run dev` for hot reload
+1. Route in `src/sentinel/api/routes.py`, schemas in `api/schemas.py`
+2. Tests in `tests/test_api.py`
 
 ## Important Notes
 
 ### Platform Requirements
-- **Linux only** for USB interception (pyudev/libusb)
-- Requires **root privileges** or `CAP_SYS_RAWIO` capability
-- udev rules in `scripts/99-usb-sentinel.rules`
+- **Linux only**; needs root to write `/sys/bus/usb/devices/*/authorized`
+- The systemd unit must not set `ProtectKernelTunables` (makes `/sys` read-only)
 
 ### Database Design
-- **Append-only**: SQLite triggers prevent deletion/modification of events
-- Tables: `devices` (fingerprinted), `events` (audit log)
-- WAL mode enabled for concurrent reads
+- **Append-only**: SQLite triggers reject UPDATE/DELETE on `events`
+- Tables: `devices` (fingerprint, trust level), `events` (audit log)
 
 ### LLM Integration
-- Primary: Anthropic Claude API (requires `ANTHROPIC_API_KEY`)
-- Optional: Local llama.cpp (`pip install usb-sentinel[local-llm]`)
-- Rate limited via token bucket algorithm
-- Prompt injection protection in prompts.py
-
-### Security Model
-- **Zero-trust enumeration**: Devices blocked until explicitly allowed
-- Default action configurable (block/review)
-- mTLS authentication available for API
-- Input sanitization before LLM analysis
+- Anthropic Claude API, enabled when `ANTHROPIC_API_KEY` is set; without it the
+  daemon runs on local scoring
+- Bounded by `interceptor.analysis_timeout`; client errors and refusals are not
+  retried
+- Optional local llama.cpp (`analyzer.provider: local`, `pip install usb-sentinel[local-llm]`)
 
 ## Configuration Reference
 
-### sentinel.yaml
+See the comments in `config/sentinel.yaml`. Notable settings:
+
 ```yaml
 daemon:
-  log_level: INFO
-  pid_file: /var/run/sentinel.pid
-
+  pid_file: /run/usb-sentinel/sentinel.pid
 policy:
-  rules_file: /etc/sentinel/policy.yaml
-  default_action: review
+  rules_file: /etc/usb-sentinel/policy.yaml
   hot_reload: true
-
 analyzer:
-  provider: anthropic  # or "local"
-  model: claude-sonnet-4-20250514
-  rate_limit: 10  # requests/minute
-
+  model: claude-sonnet-5-5
+  effort: low            # omit for models without effort support
+interceptor:
+  block_during_analysis: true   # authorized_default=0 while running
+  analysis_timeout: 10
 api:
-  host: 127.0.0.1
-  port: 8080
-  auth_mode: api_key  # none, api_key, mtls
+  enabled: false
+  auth_mode: api_key     # none, api_key
 ```
 
 ## CI/CD Pipeline
 
 GitHub Actions workflow (`.github/workflows/ci.yaml`):
-1. **Lint**: Ruff format/check
+1. **Lint**: ruff check + ruff format --check
 2. **Test**: pytest on Python 3.10, 3.11, 3.12 with coverage
-3. **Type-check**: MyPy (non-blocking)
-4. **Build**: Package verification
-
-## Project Structure
-
-```
-USB-Sentinel/
-├── src/sentinel/           # Main Python package
-│   ├── interceptor/        # L1: USB event capture
-│   ├── policy/             # L2: Rule engine
-│   ├── analyzer/           # L3: LLM analysis
-│   ├── proxy/              # L4: USB/IP sandbox
-│   ├── audit/              # L5: Database
-│   ├── api/                # REST API
-│   ├── core/               # Processing pipeline
-│   ├── cli.py              # CLI entry point
-│   └── daemon.py           # Daemon orchestrator
-├── dashboard/              # React frontend
-├── config/                 # YAML configurations
-├── tests/                  # pytest test suite
-├── scripts/                # Installation scripts
-└── docs: README.md, Spec.md, GUIDE.md
-```
+3. **Type-check**: mypy (non-blocking)
+4. **Build**: package build (needs lint + test)
 
 ## Troubleshooting
 
 | Issue | Solution |
 |-------|----------|
-| Permission denied on USB | Run with sudo or set CAP_SYS_RAWIO |
-| LLM rate limited | Adjust `analyzer.rate_limit` in config |
-| Tests fail on macOS/Windows | USB interception is Linux-only; mock tests should pass |
-| Database locked | Check for stale PID file, ensure single daemon instance |
+| "Could not set authorized_default" | Not root, or no USB buses in `/sys/bus/usb/devices` |
+| A device is held | `usb-sentinel devices list --trust review`, then `devices trust <fp> trusted` |
+| Policy change ignored | `usb-sentinel policy validate`; invalid policies are rejected and the old one kept |
+| "Another usb-sentinel daemon is running" | Only one instance may run; check `usb-sentinel status` |
